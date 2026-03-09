@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { run, get, all, save } from '../db';
 import { Agent, CreateAgentRequest, TIER_CONFIGS } from '../types';
 import { createApp, createMachine, createVolume, deleteApp, deleteMachine, getMachine, startMachine, stopMachine } from './fly';
+import { createAgentKey, deleteKey, disableKey, enableKey, getKeyInfo } from './openrouter';
 function generateId(): string { return crypto.randomUUID(); }
 function shortId(id: string): string { return id.replace(/-/g, '').slice(0, 8); }
 function now(): string { return new Date().toISOString(); }
@@ -26,7 +27,13 @@ export async function createAgent(userId: string, payload: CreateAgentRequest): 
   // Platform API never touches the agent's private key
 
   let machineId: string | null = null;
+  let orKeyHash: string | null = null;
   try {
+    // 1. Create OpenRouter API key with tier spending limit
+    const orKey = await createAgentKey(agentId, payload.name.trim(), tier);
+    orKeyHash = orKey.hash;
+
+    // 2. Create Fly app, volume, machine
     await createApp(appName);
     const volume = await createVolume(appName, volumeName, tierConfig.volumeSize);
     const machine = await createMachine({
@@ -35,21 +42,24 @@ export async function createAgent(userId: string, payload: CreateAgentRequest): 
       agentDescription: payload.description || `Hosted SAID agent: ${payload.name.trim()}`,
       programMd: payload.program_md,
       config: payload.config ? JSON.stringify(payload.config) : undefined,
+      openRouterKey: orKey.key,
     });
     machineId = machine.id;
 
     run(
       `INSERT INTO agents (id, user_id, name, fly_machine_id, fly_app_name, status, tier,
-        program_md, config, gateway_token, ai_credits_limit, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        program_md, config, gateway_token, ai_credits_limit, openrouter_key_hash, openrouter_key,
+        created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [agentId, userId, payload.name.trim(), machine.id, appName, 'running', tier,
        payload.program_md ?? null,
        payload.config ? JSON.stringify(payload.config) : null,
-       gatewayToken, tierConfig.aiCredits, now(), now()]
+       gatewayToken, tierConfig.aiCredits, orKey.hash, orKey.key, now(), now()]
     );
-    logActivity(agentId, 'system', `Agent created on Fly app ${appName}`);
+    logActivity(agentId, 'system', `Agent created on Fly app ${appName} with OpenRouter key (limit: $${orKey.limit}/mo)`);
     return get('SELECT * FROM agents WHERE id = ?', [agentId]) as Agent;
   } catch (error) {
+    if (orKeyHash) { try { await deleteKey(orKeyHash); } catch {} }
     if (machineId) { try { await deleteMachine(appName, machineId); } catch {} }
     try { await deleteApp(appName); } catch {}
     throw error;
@@ -78,26 +88,32 @@ export function updateAgent(userId: string, agentId: string, updates: { program_
 }
 
 export async function startAgent(userId: string, agentId: string): Promise<Agent> {
-  const agent = getAgentById(userId, agentId);
+  const agent = getAgentById(userId, agentId) as any;
   if (!agent?.fly_app_name || !agent?.fly_machine_id) throw new Error('Agent not found');
   await startMachine(agent.fly_app_name, agent.fly_machine_id);
+  if (agent.openrouter_key_hash) { try { await enableKey(agent.openrouter_key_hash); } catch {} }
   run('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?', ['running', now(), agentId]);
   logActivity(agentId, 'system', 'Agent started');
   return getAgentById(userId, agentId) as Agent;
 }
 
 export async function stopAgent(userId: string, agentId: string): Promise<Agent> {
-  const agent = getAgentById(userId, agentId);
+  const agent = getAgentById(userId, agentId) as any;
   if (!agent?.fly_app_name || !agent?.fly_machine_id) throw new Error('Agent not found');
   await stopMachine(agent.fly_app_name, agent.fly_machine_id);
+  if (agent.openrouter_key_hash) { try { await disableKey(agent.openrouter_key_hash); } catch {} }
   run('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?', ['stopped', now(), agentId]);
   logActivity(agentId, 'system', 'Agent stopped');
   return getAgentById(userId, agentId) as Agent;
 }
 
 export async function deleteAgent(userId: string, agentId: string): Promise<void> {
-  const agent = getAgentById(userId, agentId);
+  const agent = getAgentById(userId, agentId) as any;
   if (!agent?.fly_app_name || !agent?.fly_machine_id) throw new Error('Agent not found');
+  // Revoke OpenRouter key
+  if (agent.openrouter_key_hash) {
+    try { await deleteKey(agent.openrouter_key_hash); } catch {}
+  }
   await deleteMachine(agent.fly_app_name, agent.fly_machine_id);
   await deleteApp(agent.fly_app_name);
   run('DELETE FROM activity WHERE agent_id = ?', [agentId]);

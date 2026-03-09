@@ -111,6 +111,7 @@ export async function createMachine(params: {
   agentDescription?: string;
   programMd?: string;
   config?: string;
+  openRouterKey?: string;
 }): Promise<FlyMachineResponse> {
   const tierConfig = TIER_CONFIGS[params.tier];
   const gatewayToken = createGatewayToken();
@@ -127,7 +128,7 @@ export async function createMachine(params: {
           SAID_PLATFORM_API: 'https://said-platform-api.fly.dev',
           SAID_PLATFORM_API_KEY: process.env.API_KEY ?? '',
           OPENCLAW_GATEWAY_TOKEN: gatewayToken,
-          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? '',
+          OPENROUTER_API_KEY: params.openRouterKey ?? '',
           PROGRAM_MD: params.programMd ?? '',
           AGENT_CONFIG_JSON: params.config ?? '{}',
         },

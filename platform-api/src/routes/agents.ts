@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import { createAgent, deleteAgent, getAgentById, getAgentLogs, getAgentStatus, listAgents, startAgent, stopAgent, updateAgent } from '../services/agent';
-import { run as dbRun } from '../db';
+import { run as dbRun, get as dbGet } from '../db';
 import { CreateAgentRequest } from '../types';
+import { getKeyInfo } from '../services/openrouter';
 
 export const agentRouter = Router();
 
@@ -113,6 +114,33 @@ agentRouter.post('/:id/identity', (req, res) => {
     res.json({ ok: true, wallet: wallet.trim() });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update identity' });
+  }
+});
+
+// Get agent's OpenRouter usage stats
+agentRouter.get('/:id/usage', async (req, res) => {
+  try {
+    const userId = (req as typeof req & { userId: string }).userId;
+    const agent = dbGet('SELECT * FROM agents WHERE id = ? AND user_id = ?', [req.params.id, userId]) as any;
+    if (!agent) { res.status(404).json({ error: 'Agent not found' }); return; }
+    if (!agent.openrouter_key_hash) { res.json({ llm: null, message: 'No OpenRouter key configured' }); return; }
+
+    const keyInfo = await getKeyInfo(agent.openrouter_key_hash);
+    res.json({
+      llm: {
+        provider: 'openrouter',
+        limit: keyInfo.limit,
+        used: keyInfo.usage,
+        remaining: keyInfo.limit_remaining,
+        usage_daily: keyInfo.usage_daily,
+        usage_weekly: keyInfo.usage_weekly,
+        usage_monthly: keyInfo.usage_monthly,
+        disabled: keyInfo.disabled,
+      },
+      tier: agent.tier,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch usage' });
   }
 });
 

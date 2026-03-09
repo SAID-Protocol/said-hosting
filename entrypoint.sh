@@ -19,22 +19,29 @@ GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-$(node -e "console.log(require('crypto'
 AGENT_NAME="${SAID_AGENT_NAME:-SAID Agent}"
 MODEL="${SAID_MODEL:-anthropic/claude-sonnet-4-5}"
 
-cat > "$OPENCLAW_DIR/openclaw.json" << CONF
-{
-  "gateway": {
-    "port": 18789,
-    "mode": "local",
-    "gatewayToken": "$GATEWAY_TOKEN"
-  },
-  "agent": {
-    "name": "$AGENT_NAME",
-    "model": "$MODEL"
-  },
-  "auth": {
-    "anthropic": { "api_key_env": "ANTHROPIC_API_KEY" }
-  }
-}
-CONF
+# Use OpenRouter as LLM provider (per-agent key with spending limits)
+# Falls back to direct Anthropic if no OpenRouter key provided
+if [ -n "$OPENROUTER_API_KEY" ]; then
+  echo "[said-hosting] Using OpenRouter for LLM access (per-agent key)"
+  node -e "
+    const config = {
+      gateway: { port: 18789, mode: 'local', gatewayToken: process.env.GATEWAY_TOKEN || '$GATEWAY_TOKEN' },
+      agents: { defaults: { model: { primary: 'openrouter/anthropic/claude-sonnet-4-5' } } },
+      env: { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY }
+    };
+    require('fs').writeFileSync('$OPENCLAW_DIR/openclaw.json', JSON.stringify(config, null, 2));
+  "
+else
+  echo "[said-hosting] Using direct Anthropic API key"
+  node -e "
+    const config = {
+      gateway: { port: 18789, mode: 'local', gatewayToken: '$GATEWAY_TOKEN' },
+      agent: { name: process.env.SAID_AGENT_NAME || 'SAID Agent', model: 'anthropic/claude-sonnet-4-5' },
+      auth: { anthropic: { api_key_env: 'ANTHROPIC_API_KEY' } }
+    };
+    require('fs').writeFileSync('$OPENCLAW_DIR/openclaw.json', JSON.stringify(config, null, 2));
+  "
+fi
 
 echo "[said-hosting] Config written to $OPENCLAW_DIR/openclaw.json"
 
