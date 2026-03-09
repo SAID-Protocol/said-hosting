@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { TIER_CONFIGS } from '../types';
 
 const FLY_API_BASE = 'https://api.machines.dev/v1';
@@ -71,10 +70,6 @@ function normalizeCpuCount(cpu: string): number {
   return 1;
 }
 
-export function createGatewayToken(): string {
-  return crypto.randomBytes(24).toString('hex');
-}
-
 export async function createApp(appName: string): Promise<FlyAppResponse> {
   const org = process.env.FLY_ORG;
 
@@ -112,10 +107,10 @@ export async function createMachine(params: {
   programMd?: string;
   config?: string;
   openRouterKey?: string;
-  gatewayToken?: string;
+  gatewayToken: string; // Required: plaintext token for container env
 }): Promise<FlyMachineResponse> {
   const tierConfig = TIER_CONFIGS[params.tier];
-  const gatewayToken = params.gatewayToken || createGatewayToken();
+  const gatewayToken = params.gatewayToken;
 
   return flyRequest<FlyMachineResponse>(`/apps/${params.appName}/machines`, {
     method: 'POST',

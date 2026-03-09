@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { CreateAgentRequest, TIER_CONFIGS } from '../types';
 import { createApp, createMachine, createVolume, deleteApp, deleteMachine, getMachine, startMachine, stopMachine } from './fly';
 import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
+import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 
 function generateId(): string { return crypto.randomUUID(); }
 function shortId(id: string): string { return id.replace(/-/g, '').slice(0, 8); }
@@ -18,8 +19,9 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   const volumeName = `data_${sid}`;
   const tier = payload.tier ?? 'starter';
   const tierConfig = TIER_CONFIGS[tier];
-  // Gateway token generated here and passed to both DB and Fly machine
-  const gatewayToken = crypto.randomBytes(24).toString('hex');
+  // Gateway token generated here — plaintext passed to Fly, hash stored in DB
+  const gatewayToken = generateGatewayToken();
+  const gatewayTokenHash = hashGatewayToken(gatewayToken);
 
   if (!payload.name?.trim()) throw new Error('Agent name is required');
 
@@ -44,7 +46,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
     });
     machineId = machine.id;
 
-    // Only store the key hash — raw key is passed to the container env and never persisted by us
+    // Only store hashes — raw tokens are passed to the container env and never persisted by us
     const agent = await prisma.agent.create({
       data: {
         id: agentId,
@@ -56,7 +58,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         tier,
         programMd: payload.program_md ?? null,
         config: payload.config ? JSON.stringify(payload.config) : null,
-        gatewayToken,
+        gatewayTokenHash,
         aiCreditsLimit: tierConfig.aiCredits,
         openrouterKeyHash: orKey.hash,
       },
