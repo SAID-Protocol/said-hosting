@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { run, get, all, save } from '../db';
 import { Agent, CreateAgentRequest, TIER_CONFIGS } from '../types';
 import { createApp, createMachine, createVolume, deleteApp, deleteMachine, getMachine, startMachine, stopMachine } from './fly';
+import { generateAgentKeypair, registerSaidIdentity } from './identity';
 
 function generateId(): string { return crypto.randomUUID(); }
 function shortId(id: string): string { return id.replace(/-/g, '').slice(0, 8); }
@@ -22,22 +23,47 @@ export async function createAgent(userId: string, payload: CreateAgentRequest): 
 
   if (!payload.name?.trim()) throw new Error('Agent name is required');
 
+  // 1. Generate agent keypair (Solana wallet)
+  const { keypair, secretKeyArray } = generateAgentKeypair();
+  const agentWallet = keypair.publicKey.toString();
+
+  // 2. Register SAID identity (free, off-chain pending)
+  const saidResult = await registerSaidIdentity({
+    wallet: agentWallet,
+    name: payload.name.trim(),
+    description: payload.description || `Hosted SAID agent: ${payload.name.trim()}`,
+  });
+
+  if (!saidResult.success) {
+    console.error('SAID registration failed:', saidResult.error);
+    // Continue anyway — agent can be registered later
+  }
+
+  logActivity(agentId, 'system', saidResult.success
+    ? `SAID identity registered: ${agentWallet} (PDA: ${saidResult.pda})`
+    : `SAID registration pending — will retry (${saidResult.error})`);
+
+  // 3. Create Fly.io infrastructure
   let machineId: string | null = null;
   try {
     await createApp(appName);
     const volume = await createVolume(appName, volumeName, tierConfig.volumeSize);
     const machine = await createMachine({
       appName, agentId, tier, volumeId: volume.id,
+      agentWallet,
+      agentSecretKey: JSON.stringify(secretKeyArray),
       programMd: payload.program_md,
       config: payload.config ? JSON.stringify(payload.config) : undefined,
     });
     machineId = machine.id;
 
     run(
-      `INSERT INTO agents (id, user_id, name, fly_machine_id, fly_app_name, status, tier, program_md, config, gateway_token, ai_credits_limit, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO agents (id, user_id, name, fly_machine_id, fly_app_name, status, tier,
+        said_identity, program_md, config, gateway_token, ai_credits_limit, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [agentId, userId, payload.name.trim(), machine.id, appName, 'running', tier,
-       payload.program_md ?? null, payload.config ? JSON.stringify(payload.config) : null,
+       agentWallet, payload.program_md ?? null,
+       payload.config ? JSON.stringify(payload.config) : null,
        gatewayToken, tierConfig.aiCredits, now(), now()]
     );
     logActivity(agentId, 'system', `Agent created on Fly app ${appName}`);

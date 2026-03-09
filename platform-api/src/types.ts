@@ -34,6 +34,7 @@ export interface ActivityItem {
 
 export interface CreateAgentRequest {
   name: string;
+  description?: string;
   tier?: 'starter' | 'pro' | 'power';
   program_md?: string;
   config?: Record<string, unknown>;
