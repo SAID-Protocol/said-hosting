@@ -112,9 +112,10 @@ export async function createMachine(params: {
   programMd?: string;
   config?: string;
   openRouterKey?: string;
+  gatewayToken?: string;
 }): Promise<FlyMachineResponse> {
   const tierConfig = TIER_CONFIGS[params.tier];
-  const gatewayToken = createGatewayToken();
+  const gatewayToken = params.gatewayToken || createGatewayToken();
 
   return flyRequest<FlyMachineResponse>(`/apps/${params.appName}/machines`, {
     method: 'POST',

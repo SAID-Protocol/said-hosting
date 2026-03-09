@@ -18,6 +18,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest): 
   const volumeName = `data_${sid}`;
   const tier = payload.tier ?? 'starter';
   const tierConfig = TIER_CONFIGS[tier];
+  // Gateway token generated here and passed to both DB and Fly machine
   const gatewayToken = crypto.randomBytes(24).toString('hex');
 
   if (!payload.name?.trim()) throw new Error('Agent name is required');
@@ -43,18 +44,20 @@ export async function createAgent(userId: string, payload: CreateAgentRequest): 
       programMd: payload.program_md,
       config: payload.config ? JSON.stringify(payload.config) : undefined,
       openRouterKey: orKey.key,
+      gatewayToken,
     });
     machineId = machine.id;
 
+    // Only store the key hash — raw key is passed to the container env and never persisted by us
     run(
       `INSERT INTO agents (id, user_id, name, fly_machine_id, fly_app_name, status, tier,
-        program_md, config, gateway_token, ai_credits_limit, openrouter_key_hash, openrouter_key,
+        program_md, config, gateway_token, ai_credits_limit, openrouter_key_hash,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [agentId, userId, payload.name.trim(), machine.id, appName, 'running', tier,
        payload.program_md ?? null,
        payload.config ? JSON.stringify(payload.config) : null,
-       gatewayToken, tierConfig.aiCredits, orKey.hash, orKey.key, now(), now()]
+       gatewayToken, tierConfig.aiCredits, orKey.hash, now(), now()]
     );
     logActivity(agentId, 'system', `Agent created on Fly app ${appName} with OpenRouter key (limit: $${orKey.limit}/mo)`);
     return get('SELECT * FROM agents WHERE id = ?', [agentId]) as Agent;

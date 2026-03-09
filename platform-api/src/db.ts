@@ -33,7 +33,7 @@ export async function initDb(): Promise<SqlJsDb> {
       status TEXT DEFAULT 'creating', tier TEXT DEFAULT 'starter',
       said_identity TEXT, program_md TEXT, config TEXT, gateway_token TEXT,
       ai_credits_used REAL DEFAULT 0, ai_credits_limit REAL DEFAULT 5,
-      openrouter_key_hash TEXT, openrouter_key TEXT,
+      openrouter_key_hash TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);

@@ -7,7 +7,15 @@ import { agentRouter } from './routes/agents';
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://www.saidprotocol.com',
+    'https://saidprotocol.com',
+    'http://localhost:3000',  // local dev
+    'http://localhost:3001',
+  ],
+  credentials: true,
+}));
 app.use(express.json());
 
 app.get('/health', (_req, res) => {
