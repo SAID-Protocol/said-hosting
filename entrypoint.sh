@@ -36,5 +36,28 @@ echo "[said-hosting] Starting OpenClaw gateway..."
 echo "[said-hosting] Agent ID: ${SAID_AGENT_ID:-unset}"
 echo "[said-hosting] Tier: ${SAID_TIER:-starter}"
 
+# Generate gateway config if not exists
+if [ ! -f "$OPENCLAW_DIR/openclaw.json" ] || ! grep -q "gatewayToken" "$OPENCLAW_DIR/openclaw.json" 2>/dev/null; then
+  echo "[said-hosting] Generating gateway config..."
+  GATEWAY_TOKEN=$(node -e "console.log(require('crypto').randomBytes(24).toString('hex'))")
+  cat > "$OPENCLAW_DIR/openclaw.json" << CONF
+{
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "gatewayToken": "$GATEWAY_TOKEN"
+  },
+  "agent": {
+    "name": "${SAID_AGENT_NAME:-SAID Agent}",
+    "model": "${SAID_MODEL:-anthropic/claude-sonnet-4-5}"
+  },
+  "auth": {
+    "anthropic": { "api_key_env": "ANTHROPIC_API_KEY" }
+  }
+}
+CONF
+  echo "[said-hosting] Config generated with token: ${GATEWAY_TOKEN:0:8}..."
+fi
+
 # Start OpenClaw gateway (foreground)
 exec openclaw gateway --port 18789
