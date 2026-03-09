@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import { createAgent, deleteAgent, getAgentById, getAgentLogs, getAgentStatus, listAgents, startAgent, stopAgent, updateAgent } from '../services/agent';
+import { run as dbRun } from '../db';
 import { CreateAgentRequest } from '../types';
 
 export const agentRouter = Router();
@@ -94,6 +95,24 @@ agentRouter.get('/:id/logs', (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to fetch logs';
     res.status(message === 'Agent not found' ? 404 : 400).json({ error: message });
+  }
+});
+
+// Called by the agent container on first boot to report its wallet
+agentRouter.post('/:id/identity', (req, res) => {
+  try {
+    const wallet = req.body?.wallet;
+    if (typeof wallet !== 'string' || !wallet.trim()) {
+      res.status(400).json({ error: 'wallet is required' });
+      return;
+    }
+
+    dbRun('UPDATE agents SET said_identity = ?, updated_at = ? WHERE id = ?',
+      [wallet.trim(), new Date().toISOString(), req.params.id]);
+
+    res.json({ ok: true, wallet: wallet.trim() });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update identity' });
   }
 });
 

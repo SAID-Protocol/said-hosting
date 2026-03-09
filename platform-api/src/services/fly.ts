@@ -107,8 +107,8 @@ export async function createMachine(params: {
   agentId: string;
   tier: TierKey;
   volumeId: string;
-  agentWallet?: string;
-  agentSecretKey?: string;
+  agentName?: string;
+  agentDescription?: string;
   programMd?: string;
   config?: string;
 }): Promise<FlyMachineResponse> {
@@ -122,8 +122,10 @@ export async function createMachine(params: {
         image: AGENT_IMAGE,
         env: {
           SAID_AGENT_ID: params.agentId,
-          SAID_AGENT_WALLET: params.agentWallet ?? '',
-          SAID_AGENT_SECRET_KEY: params.agentSecretKey ?? '',
+          SAID_AGENT_NAME: params.agentName ?? 'SAID Agent',
+          SAID_AGENT_DESCRIPTION: params.agentDescription ?? '',
+          SAID_PLATFORM_API: 'https://said-platform-api.fly.dev',
+          SAID_PLATFORM_API_KEY: process.env.API_KEY ?? '',
           OPENCLAW_GATEWAY_TOKEN: gatewayToken,
           ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? '',
           PROGRAM_MD: params.programMd ?? '',

@@ -3,6 +3,7 @@ set -e
 
 WORKSPACE="/agent/data/workspace"
 OPENCLAW_DIR="/home/agent/.openclaw"
+DATA_DIR="/agent/data"
 
 # Initialize workspace on first run
 if [ ! -d "$WORKSPACE" ]; then
@@ -10,7 +11,7 @@ if [ ! -d "$WORKSPACE" ]; then
   mkdir -p "$WORKSPACE"
 fi
 
-# Always ensure .openclaw dir exists (may be first boot or volume was empty)
+# Always ensure .openclaw dir exists
 mkdir -p "$OPENCLAW_DIR"
 
 # Generate gateway config with mode=local
@@ -36,8 +37,6 @@ cat > "$OPENCLAW_DIR/openclaw.json" << CONF
 CONF
 
 echo "[said-hosting] Config written to $OPENCLAW_DIR/openclaw.json"
-echo "[said-hosting] Gateway token: ${GATEWAY_TOKEN:0:8}..."
-echo "[said-hosting] Agent: $AGENT_NAME | Model: $MODEL"
 
 # Copy SAID skill if available
 if [ -d /agent/skills ]; then
@@ -45,7 +44,7 @@ if [ -d /agent/skills ]; then
   cp -r /agent/skills/* "$OPENCLAW_DIR/skills/" 2>/dev/null || true
 fi
 
-# Copy base agent files to workspace
+# Copy base agent files to workspace (first boot only)
 for f in AGENTS.md SOUL.md; do
   if [ -f "/agent/config/$f" ] && [ ! -f "$WORKSPACE/$f" ]; then
     cp "/agent/config/$f" "$WORKSPACE/$f"
@@ -60,9 +59,26 @@ fi
 
 cd "$WORKSPACE"
 
+# === SAID Identity Bootstrap (first boot) ===
+if [ ! -f "$DATA_DIR/wallet.json" ]; then
+  echo "[said-hosting] First boot — bootstrapping SAID identity..."
+  export AGENT_DATA_DIR="$DATA_DIR"
+  node /agent/scripts/bootstrap-identity.mjs || echo "[said-hosting] Bootstrap completed with warnings (non-fatal)"
+  echo "[said-hosting] Identity bootstrap complete."
+else
+  echo "[said-hosting] Wallet exists, skipping bootstrap."
+  # Show wallet address
+  node -e "
+    const fs = require('fs');
+    const { Keypair } = require('@solana/web3.js');
+    const raw = JSON.parse(fs.readFileSync('$DATA_DIR/wallet.json', 'utf8'));
+    const kp = Keypair.fromSecretKey(Uint8Array.from(raw));
+    console.log('[said-hosting] Agent wallet: ' + kp.publicKey.toString());
+  " 2>/dev/null || true
+fi
+
 echo "[said-hosting] Starting OpenClaw gateway..."
-echo "[said-hosting] Agent ID: ${SAID_AGENT_ID:-unset}"
-echo "[said-hosting] Tier: ${SAID_TIER:-starter}"
+echo "[said-hosting] Agent: $AGENT_NAME | Tier: ${SAID_TIER:-starter}"
 
 # Start OpenClaw gateway (foreground)
 exec openclaw gateway --port 18789
