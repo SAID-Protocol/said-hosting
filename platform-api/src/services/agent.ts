@@ -1,17 +1,17 @@
 import crypto from 'crypto';
-import { run, get, all, save } from '../db';
-import { Agent, CreateAgentRequest, TIER_CONFIGS } from '../types';
+import { prisma } from '../db';
+import { CreateAgentRequest, TIER_CONFIGS } from '../types';
 import { createApp, createMachine, createVolume, deleteApp, deleteMachine, getMachine, startMachine, stopMachine } from './fly';
-import { createAgentKey, deleteKey, disableKey, enableKey, getKeyInfo } from './openrouter';
+import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
+
 function generateId(): string { return crypto.randomUUID(); }
 function shortId(id: string): string { return id.replace(/-/g, '').slice(0, 8); }
-function now(): string { return new Date().toISOString(); }
 
 function logActivity(agentId: string, type: string, data: string) {
-  run('INSERT INTO activity (agent_id, type, data) VALUES (?, ?, ?)', [agentId, type, data]);
+  prisma.activity.create({ data: { agentId, type, data } }).catch(console.error);
 }
 
-export async function createAgent(userId: string, payload: CreateAgentRequest): Promise<Agent> {
+export async function createAgent(userId: string, payload: CreateAgentRequest) {
   const agentId = generateId();
   const sid = shortId(agentId);
   const appName = `said-${sid}`;
@@ -22,10 +22,6 @@ export async function createAgent(userId: string, payload: CreateAgentRequest): 
   const gatewayToken = crypto.randomBytes(24).toString('hex');
 
   if (!payload.name?.trim()) throw new Error('Agent name is required');
-
-  // Keypair + SAID identity generated inside the container on first boot
-  // (see scripts/bootstrap-identity.mjs)
-  // Platform API never touches the agent's private key
 
   let machineId: string | null = null;
   let orKeyHash: string | null = null;
@@ -49,18 +45,24 @@ export async function createAgent(userId: string, payload: CreateAgentRequest): 
     machineId = machine.id;
 
     // Only store the key hash — raw key is passed to the container env and never persisted by us
-    run(
-      `INSERT INTO agents (id, user_id, name, fly_machine_id, fly_app_name, status, tier,
-        program_md, config, gateway_token, ai_credits_limit, openrouter_key_hash,
-        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [agentId, userId, payload.name.trim(), machine.id, appName, 'running', tier,
-       payload.program_md ?? null,
-       payload.config ? JSON.stringify(payload.config) : null,
-       gatewayToken, tierConfig.aiCredits, orKey.hash, now(), now()]
-    );
+    const agent = await prisma.agent.create({
+      data: {
+        id: agentId,
+        userId,
+        name: payload.name.trim(),
+        flyMachineId: machine.id,
+        flyAppName: appName,
+        status: 'running',
+        tier,
+        programMd: payload.program_md ?? null,
+        config: payload.config ? JSON.stringify(payload.config) : null,
+        gatewayToken,
+        aiCreditsLimit: tierConfig.aiCredits,
+        openrouterKeyHash: orKey.hash,
+      },
+    });
     logActivity(agentId, 'system', `Agent created on Fly app ${appName} with OpenRouter key (limit: $${orKey.limit}/mo)`);
-    return get('SELECT * FROM agents WHERE id = ?', [agentId]) as Agent;
+    return agent;
   } catch (error) {
     if (orKeyHash) { try { await deleteKey(orKeyHash); } catch {} }
     if (machineId) { try { await deleteMachine(appName, machineId); } catch {} }
@@ -69,69 +71,76 @@ export async function createAgent(userId: string, payload: CreateAgentRequest): 
   }
 }
 
-export function listAgents(userId: string): Agent[] {
-  return all('SELECT * FROM agents WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+export async function listAgents(userId: string) {
+  return prisma.agent.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+  });
 }
 
-export function getAgentById(userId: string, agentId: string): Agent | undefined {
-  return get('SELECT * FROM agents WHERE id = ? AND user_id = ?', [agentId, userId]);
+export async function getAgentById(userId: string, agentId: string) {
+  return prisma.agent.findFirst({
+    where: { id: agentId, userId },
+  });
 }
 
-export function updateAgent(userId: string, agentId: string, updates: { program_md?: string | null; config?: Record<string, unknown> | null }): Agent {
-  const existing = getAgentById(userId, agentId);
+export async function updateAgent(userId: string, agentId: string, updates: { program_md?: string | null; config?: Record<string, unknown> | null }) {
+  const existing = await getAgentById(userId, agentId);
   if (!existing) throw new Error('Agent not found');
 
-  const nextProgramMd = updates.program_md ?? existing.program_md;
-  const nextConfig = updates.config === undefined ? existing.config : updates.config === null ? null : JSON.stringify(updates.config);
-
-  run('UPDATE agents SET program_md = ?, config = ?, updated_at = ? WHERE id = ? AND user_id = ?',
-    [nextProgramMd, nextConfig, now(), agentId, userId]);
-  logActivity(agentId, 'system', 'Agent configuration updated');
-  return getAgentById(userId, agentId) as Agent;
+  return prisma.agent.update({
+    where: { id: agentId },
+    data: {
+      programMd: updates.program_md ?? existing.programMd,
+      config: updates.config === undefined ? existing.config : updates.config === null ? null : JSON.stringify(updates.config),
+    },
+  });
 }
 
-export async function startAgent(userId: string, agentId: string): Promise<Agent> {
-  const agent = getAgentById(userId, agentId) as any;
-  if (!agent?.fly_app_name || !agent?.fly_machine_id) throw new Error('Agent not found');
-  await startMachine(agent.fly_app_name, agent.fly_machine_id);
-  if (agent.openrouter_key_hash) { try { await enableKey(agent.openrouter_key_hash); } catch {} }
-  run('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?', ['running', now(), agentId]);
+export async function startAgent(userId: string, agentId: string) {
+  const agent = await getAgentById(userId, agentId);
+  if (!agent?.flyAppName || !agent?.flyMachineId) throw new Error('Agent not found');
+  await startMachine(agent.flyAppName, agent.flyMachineId);
+  if (agent.openrouterKeyHash) { try { await enableKey(agent.openrouterKeyHash); } catch {} }
+  const updated = await prisma.agent.update({ where: { id: agentId }, data: { status: 'running' } });
   logActivity(agentId, 'system', 'Agent started');
-  return getAgentById(userId, agentId) as Agent;
+  return updated;
 }
 
-export async function stopAgent(userId: string, agentId: string): Promise<Agent> {
-  const agent = getAgentById(userId, agentId) as any;
-  if (!agent?.fly_app_name || !agent?.fly_machine_id) throw new Error('Agent not found');
-  await stopMachine(agent.fly_app_name, agent.fly_machine_id);
-  if (agent.openrouter_key_hash) { try { await disableKey(agent.openrouter_key_hash); } catch {} }
-  run('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?', ['stopped', now(), agentId]);
+export async function stopAgent(userId: string, agentId: string) {
+  const agent = await getAgentById(userId, agentId);
+  if (!agent?.flyAppName || !agent?.flyMachineId) throw new Error('Agent not found');
+  await stopMachine(agent.flyAppName, agent.flyMachineId);
+  if (agent.openrouterKeyHash) { try { await disableKey(agent.openrouterKeyHash); } catch {} }
+  const updated = await prisma.agent.update({ where: { id: agentId }, data: { status: 'stopped' } });
   logActivity(agentId, 'system', 'Agent stopped');
-  return getAgentById(userId, agentId) as Agent;
+  return updated;
 }
 
-export async function deleteAgent(userId: string, agentId: string): Promise<void> {
-  const agent = getAgentById(userId, agentId) as any;
-  if (!agent?.fly_app_name || !agent?.fly_machine_id) throw new Error('Agent not found');
+export async function deleteAgent(userId: string, agentId: string) {
+  const agent = await getAgentById(userId, agentId);
+  if (!agent?.flyAppName || !agent?.flyMachineId) throw new Error('Agent not found');
   // Revoke OpenRouter key
-  if (agent.openrouter_key_hash) {
-    try { await deleteKey(agent.openrouter_key_hash); } catch {}
-  }
-  await deleteMachine(agent.fly_app_name, agent.fly_machine_id);
-  await deleteApp(agent.fly_app_name);
-  run('DELETE FROM activity WHERE agent_id = ?', [agentId]);
-  run('DELETE FROM agents WHERE id = ? AND user_id = ?', [agentId, userId]);
+  if (agent.openrouterKeyHash) { try { await deleteKey(agent.openrouterKeyHash); } catch {} }
+  await deleteMachine(agent.flyAppName, agent.flyMachineId);
+  await deleteApp(agent.flyAppName);
+  await prisma.activity.deleteMany({ where: { agentId } });
+  await prisma.agent.delete({ where: { id: agentId } });
 }
 
 export async function getAgentStatus(userId: string, agentId: string) {
-  const agent = getAgentById(userId, agentId);
-  if (!agent?.fly_app_name || !agent?.fly_machine_id) throw new Error('Agent not found');
-  const fly = await getMachine(agent.fly_app_name, agent.fly_machine_id);
+  const agent = await getAgentById(userId, agentId);
+  if (!agent?.flyAppName || !agent?.flyMachineId) throw new Error('Agent not found');
+  const fly = await getMachine(agent.flyAppName, agent.flyMachineId);
   return { agent, fly };
 }
 
-export function getAgentLogs(userId: string, agentId: string) {
-  const agent = getAgentById(userId, agentId);
+export async function getAgentLogs(userId: string, agentId: string) {
+  const agent = await getAgentById(userId, agentId);
   if (!agent) throw new Error('Agent not found');
-  return all('SELECT * FROM activity WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50', [agentId]);
+  return prisma.activity.findMany({
+    where: { agentId },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
 }

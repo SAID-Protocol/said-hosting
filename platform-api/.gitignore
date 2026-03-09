@@ -1,3 +1,5 @@
 .env
 data/
 dist/
+
+/src/generated/prisma

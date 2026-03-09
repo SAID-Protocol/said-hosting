@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { initDb, run, get } from './db';
+import { initDb, prisma } from './db';
 import { agentRouter } from './routes/agents';
 
 const app = express();
@@ -11,7 +11,8 @@ app.use(cors({
   origin: [
     'https://www.saidprotocol.com',
     'https://saidprotocol.com',
-    'http://localhost:3000',  // local dev
+    'https://app.saidprotocol.com',
+    'http://localhost:3000',
     'http://localhost:3001',
   ],
   credentials: true,
@@ -19,7 +20,7 @@ app.use(cors({
 app.use(express.json());
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', version: '0.1.0' });
+  res.json({ status: 'ok', version: '0.2.0' });
 });
 
 app.use('/api/agents', agentRouter);
@@ -27,14 +28,16 @@ app.use('/api/agents', agentRouter);
 async function start() {
   await initDb();
 
-  // Create default user if not exists
-  const defaultUser = get('SELECT id FROM users WHERE id = ?', ['default-user']);
+  // Create default admin user if not exists (dev only)
+  const defaultUser = await prisma.user.findUnique({ where: { id: 'default-user' } });
   if (!defaultUser) {
-    run('INSERT INTO users (id, email, tier) VALUES (?, ?, ?)', ['default-user', 'admin@saidprotocol.com', 'power']);
+    await prisma.user.create({
+      data: { id: 'default-user', email: 'admin@saidprotocol.com', tier: 'power' },
+    });
   }
 
   app.listen(PORT, () => {
-    console.log(`SAID Platform API running on port ${PORT}`);
+    console.log(`SAID Platform API v0.2.0 running on port ${PORT}`);
   });
 }
 

@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String   @id @default(uuid())
+  privyId    String?  @unique @map("privy_id")
+  email      String?
+  tier       String   @default("starter")
+  saidPubkey String?  @map("said_pubkey")
+  createdAt  DateTime @default(now()) @map("created_at")
+  agents     Agent[]
+
+  @@map("users")
+}
+
+model Agent {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  name              String
+  flyMachineId      String?  @map("fly_machine_id")
+  flyAppName        String?  @map("fly_app_name")
+  status            String   @default("creating")
+  tier              String   @default("starter")
+  saidIdentity      String?  @map("said_identity")
+  programMd         String?  @map("program_md")
+  config            String?
+  gatewayToken      String?  @map("gateway_token")
+  aiCreditsUsed     Float    @default(0) @map("ai_credits_used")
+  aiCreditsLimit    Float    @default(5) @map("ai_credits_limit")
+  openrouterKeyHash String?  @map("openrouter_key_hash")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user     User       @relation(fields: [userId], references: [id])
+  activity Activity[]
+
+  @@map("agents")
+}
+
+model Activity {
+  id        Int      @id @default(autoincrement())
+  agentId   String   @map("agent_id")
+  type      String
+  data      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@map("activity")
+}
