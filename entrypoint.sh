@@ -25,12 +25,24 @@ if [ -n "$OPENROUTER_API_KEY" ]; then
   echo "[said-hosting] Using OpenRouter for LLM access (per-agent key)"
   node -e "
     const config = {
+      meta: {
+        lastTouchedVersion: '2026.2.9',
+        lastTouchedAt: new Date().toISOString()
+      },
       gateway: {
         port: 18789,
         bind: 'lan',
         mode: 'local',
         auth: { mode: 'token', token: process.env.OPENCLAW_GATEWAY_TOKEN || '$GATEWAY_TOKEN' },
         http: { endpoints: { chatCompletions: { enabled: true } } }
+      },
+      auth: {
+        profiles: {
+          'openrouter:default': {
+            provider: 'openrouter',
+            mode: 'api_key'
+          }
+        }
       },
       agents: { defaults: { model: { primary: 'openrouter/anthropic/claude-sonnet-4-5' } } },
       env: { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY }
@@ -98,5 +110,68 @@ fi
 echo "[said-hosting] Starting OpenClaw gateway..."
 echo "[said-hosting] Agent: $AGENT_NAME | Tier: ${SAID_TIER:-starter}"
 
-# Start OpenClaw gateway (foreground)
-exec openclaw gateway --port 18789
+# Start OpenClaw gateway in background, then patch config after it initializes
+openclaw gateway --port 18789 &
+GATEWAY_PID=$!
+
+# Wait for gateway to be ready (it rewrites config on first boot)
+echo "[said-hosting] Waiting for gateway to initialize..."
+for i in $(seq 1 30); do
+  if curl -sf http://127.0.0.1:18789/ > /dev/null 2>&1; then
+    echo "[said-hosting] Gateway is up after ${i}s"
+    break
+  fi
+  sleep 1
+done
+
+# Patch config AFTER OpenClaw has done its normalization
+PATCH_JSON='{}'
+if [ -n "$OPENROUTER_API_KEY" ]; then
+  echo "[said-hosting] Patching config: enabling chatCompletions + OpenRouter model"
+  PATCH_JSON=$(node -e "
+    console.log(JSON.stringify({
+      gateway: { http: { endpoints: { chatCompletions: { enabled: true } } } },
+      agents: { defaults: { model: { primary: 'openrouter/anthropic/claude-sonnet-4-5' } } },
+      env: { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY }
+    }));
+  ")
+else
+  echo "[said-hosting] Patching config: enabling chatCompletions"
+  PATCH_JSON='{"gateway":{"http":{"endpoints":{"chatCompletions":{"enabled":true}}}}}'
+fi
+
+# Apply the patch via the gateway's HTTP API
+curl -sf -X PATCH "http://127.0.0.1:18789/__openclaw__/api/config" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GATEWAY_TOKEN" \
+  -d "$PATCH_JSON" > /dev/null 2>&1 && echo "[said-hosting] Config patched successfully" || echo "[said-hosting] Config patch failed (will retry via file)"
+
+# Fallback: if API patch didn't work, patch the file directly and restart
+if ! curl -sf http://127.0.0.1:18789/v1/chat/completions -H "Authorization: Bearer $GATEWAY_TOKEN" -d '{}' 2>&1 | grep -q "model"; then
+  echo "[said-hosting] Patching config file directly..."
+  node -e "
+    const fs = require('fs');
+    const cfg = JSON.parse(fs.readFileSync('$OPENCLAW_DIR/openclaw.json', 'utf8'));
+    if (!cfg.gateway) cfg.gateway = {};
+    if (!cfg.gateway.http) cfg.gateway.http = {};
+    if (!cfg.gateway.http.endpoints) cfg.gateway.http.endpoints = {};
+    cfg.gateway.http.endpoints.chatCompletions = { enabled: true };
+    if (process.env.OPENROUTER_API_KEY) {
+      cfg.agents = cfg.agents || {};
+      cfg.agents.defaults = cfg.agents.defaults || {};
+      cfg.agents.defaults.model = cfg.agents.defaults.model || {};
+      cfg.agents.defaults.model.primary = 'openrouter/anthropic/claude-sonnet-4-5';
+      cfg.env = cfg.env || {};
+      cfg.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+    }
+    fs.writeFileSync('$OPENCLAW_DIR/openclaw.json', JSON.stringify(cfg, null, 2));
+    console.log('[said-hosting] Config file patched');
+  "
+  # Restart gateway to pick up changes
+  kill $GATEWAY_PID 2>/dev/null
+  sleep 2
+  exec openclaw gateway --port 18789
+fi
+
+# Keep the background gateway process as the main process
+wait $GATEWAY_PID
