@@ -48,12 +48,6 @@ agentRouter.post('/:id/confirm-said', async (req, res) => {
 });
 
 agentRouter.use(async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  if (authHeader?.startsWith('Bearer ')) {
-    next();
-    return;
-  }
-
   const apiKey = req.headers['x-api-key'];
   if (typeof apiKey === 'string' && apiKey === process.env.API_KEY) {
     (req as typeof req & { userId: string }).userId = 'default-user';
