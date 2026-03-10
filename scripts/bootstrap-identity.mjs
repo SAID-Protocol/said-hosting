@@ -118,35 +118,50 @@ async function registerHostedIdentity(keypair) {
     funding: null,
   };
 
-  try {
-    const registerRes = await platformPost(`/api/agents/${AGENT_ID}/register-said`, {
-      walletAddress: wallet,
-    });
+  // Retry logic for blockhash expiration
+  const maxRetries = 2;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const registerRes = await platformPost(`/api/agents/${AGENT_ID}/register-said`, {
+        walletAddress: wallet,
+      });
 
-    const unsigned = registerRes.unsignedTransaction;
-    if (!unsigned || typeof unsigned !== 'string') {
-      throw new Error('Platform API did not return unsignedTransaction');
+      const unsigned = registerRes.unsignedTransaction;
+      if (!unsigned || typeof unsigned !== 'string') {
+        throw new Error('Platform API did not return unsignedTransaction');
+      }
+
+      const tx = VersionedTransaction.deserialize(Buffer.from(unsigned, 'base64'));
+      tx.sign([keypair]);
+      const signedTransaction = Buffer.from(tx.serialize()).toString('base64');
+
+      const confirmRes = await platformPost(`/api/agents/${AGENT_ID}/confirm-said`, {
+        signedTransaction,
+      });
+
+      result.registered = true;
+      result.saidPda = confirmRes.saidPda || confirmRes.agent?.saidPda || null;
+      result.registrationSignature = confirmRes.signature || null;
+      result.funding = confirmRes.funding || null;
+
+      writeStatus(result);
+      log(`SAID hosted registration complete${result.saidPda ? `: ${result.saidPda}` : ''}`);
+      return; // Success!
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown registration error';
+      
+      // Check if blockhash expired and we can retry
+      if (errorMsg.includes('BLOCKHASH_EXPIRED') && attempt < maxRetries - 1) {
+        log(`SAID registration expired (attempt ${attempt + 1}/${maxRetries}), retrying...`);
+        continue; // Retry from register
+      }
+      
+      // Final error
+      result.error = errorMsg;
+      writeStatus(result);
+      log(`SAID registration failed (continuing boot): ${result.error}`);
+      return;
     }
-
-    const tx = VersionedTransaction.deserialize(Buffer.from(unsigned, 'base64'));
-    tx.sign([keypair]);
-    const signedTransaction = Buffer.from(tx.serialize()).toString('base64');
-
-    const confirmRes = await platformPost(`/api/agents/${AGENT_ID}/confirm-said`, {
-      signedTransaction,
-    });
-
-    result.registered = true;
-    result.saidPda = confirmRes.saidPda || confirmRes.agent?.saidPda || null;
-    result.registrationSignature = confirmRes.signature || null;
-    result.funding = confirmRes.funding || null;
-
-    writeStatus(result);
-    log(`SAID hosted registration complete${result.saidPda ? `: ${result.saidPda}` : ''}`);
-  } catch (error) {
-    result.error = error instanceof Error ? error.message : 'Unknown registration error';
-    writeStatus(result);
-    log(`SAID registration failed (continuing boot): ${result.error}`);
   }
 }
 
