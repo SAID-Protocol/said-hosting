@@ -4,6 +4,7 @@ import { CreateAgentRequest, TIER_CONFIGS } from '../types';
 import { createApp, createMachine, createVolume, deleteApp, deleteMachine, getMachine, startMachine, stopMachine } from './fly';
 import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
 import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
+import { AgentConfig, getWorkspaceFiles } from './workspace';
 
 function generateId(): string { return crypto.randomUUID(); }
 function shortId(id: string): string { return id.replace(/-/g, '').slice(0, 8); }
@@ -25,6 +26,20 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
 
   if (!payload.name?.trim()) throw new Error('Agent name is required');
 
+  // Generate workspace files from wizard config (or sensible defaults)
+  const agentConfig: AgentConfig = (payload.config as unknown as AgentConfig) ?? {
+    name: payload.name.trim(),
+    template: 'assistant',
+    personality: { style: 50, initiative: 50, detail: 50 },
+    skills: [],
+    autonomy: 'assistant',
+    tier,
+  };
+  // Ensure name and tier stay in sync with top-level payload
+  agentConfig.name = payload.name.trim();
+  agentConfig.tier = tier;
+  const workspaceFiles = getWorkspaceFiles(agentConfig);
+
   let machineId: string | null = null;
   let orKeyHash: string | null = null;
   try {
@@ -41,6 +56,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
       agentDescription: payload.description || `Hosted SAID agent: ${payload.name.trim()}`,
       programMd: payload.program_md,
       config: payload.config ? JSON.stringify(payload.config) : undefined,
+      workspaceFiles: JSON.stringify(workspaceFiles),
       openRouterKey: orKey.key,
       gatewayToken,
     });

@@ -1,7 +1,7 @@
 import { TIER_CONFIGS } from '../types';
 
 const FLY_API_BASE = 'https://api.machines.dev/v1';
-const AGENT_IMAGE = 'registry.fly.io/said-agent-test:deployment-01KKB2G2KTEB3PCB9WZR85PEBD';
+const AGENT_IMAGE = 'registry.fly.io/said-agent-test:deployment-01KKB4TTC52J8BT38D0PCJ4VB2';
 
 type TierKey = 'starter' | 'pro' | 'power';
 
@@ -132,6 +132,7 @@ export async function createMachine(params: {
   config?: string;
   openRouterKey?: string;
   gatewayToken: string; // Required: plaintext token for container env
+  workspaceFiles?: string; // JSON array of {path, content} written at boot
 }): Promise<FlyMachineResponse> {
   const tierConfig = TIER_CONFIGS[params.tier];
   const gatewayToken = params.gatewayToken;
@@ -151,6 +152,7 @@ export async function createMachine(params: {
           OPENROUTER_API_KEY: params.openRouterKey ?? '',
           PROGRAM_MD: params.programMd ?? '',
           AGENT_CONFIG_JSON: params.config ?? '{}',
+          WORKSPACE_FILES_JSON: params.workspaceFiles ?? '[]',
         },
         guest: {
           cpu_kind: normalizeCpuKind(tierConfig.cpu),
