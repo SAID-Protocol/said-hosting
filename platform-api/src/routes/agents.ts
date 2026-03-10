@@ -163,13 +163,16 @@ agentRouter.post('/:id/chat', async (req, res) => {
     }
 
     const gatewayToken = agent.gatewayToken;
-    const response = await fetch(`https://${agent.flyAppName}.fly.dev/hooks/wake`, {
+    const response = await fetch(`https://${agent.flyAppName}.fly.dev/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(gatewayToken ? { 'Authorization': `Bearer ${gatewayToken}` } : {}),
       },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        model: 'openrouter/anthropic/claude-sonnet-4-5',
+        messages: [{ role: 'user', content: message }],
+      }),
     });
 
     const text = await response.text();

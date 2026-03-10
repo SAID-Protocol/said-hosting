@@ -29,7 +29,8 @@ if [ -n "$OPENROUTER_API_KEY" ]; then
         port: 18789,
         bind: 'lan',
         mode: 'local',
-        auth: { mode: 'token', token: process.env.OPENCLAW_GATEWAY_TOKEN || '$GATEWAY_TOKEN' }
+        auth: { mode: 'token', token: process.env.OPENCLAW_GATEWAY_TOKEN || '$GATEWAY_TOKEN' },
+        http: { endpoints: { chatCompletions: { enabled: true } } }
       },
       agents: { defaults: { model: { primary: 'openrouter/anthropic/claude-sonnet-4-5' } } },
       env: { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY }
