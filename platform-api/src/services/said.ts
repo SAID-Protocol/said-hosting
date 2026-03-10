@@ -54,6 +54,12 @@ export type SaidRegisterResult = {
 
 export type SaidConfirmRequest = {
   signedTransaction: string;
+  wallet: string;
+  name: string;
+  description?: string;
+  twitter?: string;
+  website?: string;
+  capabilities?: string[];
 };
 
 export type SaidConfirmResult = {

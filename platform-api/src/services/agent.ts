@@ -161,8 +161,15 @@ export async function registerAgentSaid(agentId: string, walletAddress: string) 
 export async function confirmAgentSaid(agentId: string, signedTransaction: string) {
   const agent = await prisma.agent.findUnique({ where: { id: agentId } });
   if (!agent) throw new Error('Agent not found');
+  if (!agent.walletAddress) throw new Error('Agent wallet address missing');
 
-  const confirmation = await confirmHostedAgent({ signedTransaction });
+  const confirmation = await confirmHostedAgent({
+    signedTransaction,
+    wallet: agent.walletAddress,
+    name: agent.name,
+    description: `Hosted SAID agent: ${agent.name}`,
+    capabilities: ['messaging', 'web-search'],
+  });
   if (!confirmation.success) {
     throw new Error(confirmation.error || 'Failed to confirm SAID identity');
   }
