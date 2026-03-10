@@ -11,11 +11,13 @@ RUN apt-get update && apt-get install -y \
 # Install OpenClaw globally
 RUN npm install -g openclaw@latest
 
-# Install SAID identity bootstrap dependencies
-RUN npm install -g @solana/web3.js bs58 tweetnacl
-
 # Create agent workspace
 RUN mkdir -p /agent/workspace /agent/data /agent/scripts
+
+# Install SAID identity bootstrap dependencies (local to scripts dir for ESM resolution)
+WORKDIR /agent/scripts
+RUN npm init -y && npm install @solana/web3.js bs58 tweetnacl
+WORKDIR /agent/workspace
 
 # Set working directory
 WORKDIR /agent/workspace

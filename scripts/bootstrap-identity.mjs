@@ -19,7 +19,7 @@ const DATA_DIR = process.env.AGENT_DATA_DIR || '/agent/data';
 const WALLET_PATH = path.join(DATA_DIR, 'wallet.json');
 const STATUS_PATH = path.join(DATA_DIR, 'said-identity.json');
 const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://newest-restless-mansion.solana-mainnet.quiknode.pro/af7d979a4ef8558eb0da3166819eac8af0d3dd2b';
 const PROGRAM_ID = new PublicKey('5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G');
 
 const AGENT_NAME = process.env.SAID_AGENT_NAME || 'SAID Agent';
