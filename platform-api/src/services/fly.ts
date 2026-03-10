@@ -85,16 +85,24 @@ export async function createApp(appName: string): Promise<FlyAppResponse> {
     }),
   });
 
-  // Allocate public IPs so the app is reachable at {appName}.fly.dev
+  // Allocate public IPs via Fly GraphQL API (Machines API doesn't support /ips)
   try {
-    await flyRequest(`/apps/${appName}/ips`, {
-      method: 'POST',
-      body: JSON.stringify({ type: 'shared_v4' }),
-    });
-    await flyRequest(`/apps/${appName}/ips`, {
-      method: 'POST',
-      body: JSON.stringify({ type: 'v6' }),
-    });
+    const gqlToken = process.env.FLY_API_TOKEN;
+    const allocateIp = async (type: string) => {
+      const res = await fetch('https://api.fly.io/graphql', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${gqlToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `mutation($input: AllocateIPAddressInput!) { allocateIpAddress(input: $input) { ipAddress { id address type } } }`,
+          variables: { input: { appId: appName, type } },
+        }),
+      });
+      const data = await res.json() as { data?: unknown; errors?: unknown[] };
+      if (data.errors) console.warn(`[fly] IP alloc (${type}):`, data.errors);
+    };
+    await allocateIp('shared_v4');
+    await allocateIp('v6');
+    console.log(`[fly] IPs allocated for ${appName}`);
   } catch (err) {
     console.warn(`[fly] IP allocation warning for ${appName}:`, err);
   }
