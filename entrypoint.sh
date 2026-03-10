@@ -74,17 +74,41 @@ if [ -d /agent/skills ]; then
   cp -r /agent/skills/* "$OPENCLAW_DIR/skills/" 2>/dev/null || true
 fi
 
-# Copy base agent files to workspace (first boot only)
-for f in AGENTS.md SOUL.md; do
-  if [ -f "/agent/config/$f" ] && [ ! -f "$WORKSPACE/$f" ]; then
-    cp "/agent/config/$f" "$WORKSPACE/$f"
-  fi
-done
+# === Workspace file generation ===
+# If WORKSPACE_FILES_JSON is set, write all generated files (from wizard)
+if [ -n "$WORKSPACE_FILES_JSON" ]; then
+  echo "[said-hosting] Writing workspace files from wizard config..."
+  node -e "
+    const fs = require('fs');
+    const path = require('path');
+    const workspace = '$WORKSPACE';
+    const files = JSON.parse(process.env.WORKSPACE_FILES_JSON);
+    for (const f of files) {
+      const fullPath = path.join(workspace, f.path);
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      // Only write if file doesn't exist (preserve user edits on restart)
+      if (!fs.existsSync(fullPath)) {
+        fs.writeFileSync(fullPath, f.content);
+        console.log('[said-hosting] Wrote: ' + f.path);
+      } else {
+        console.log('[said-hosting] Skipped (exists): ' + f.path);
+      }
+    }
+  "
+else
+  echo "[said-hosting] No WORKSPACE_FILES_JSON — using base config files"
+  # Fallback: copy base agent files to workspace (first boot only)
+  for f in AGENTS.md SOUL.md; do
+    if [ -f "/agent/config/$f" ] && [ ! -f "$WORKSPACE/$f" ]; then
+      cp "/agent/config/$f" "$WORKSPACE/$f"
+    fi
+  done
 
-# Write program.md from env if provided
-if [ -n "$PROGRAM_MD" ]; then
-  echo "$PROGRAM_MD" > "$WORKSPACE/SOUL.md"
-  echo "[said-hosting] Injected program.md into SOUL.md"
+  # Write program.md from env if provided
+  if [ -n "$PROGRAM_MD" ]; then
+    echo "$PROGRAM_MD" > "$WORKSPACE/SOUL.md"
+    echo "[said-hosting] Injected program.md into SOUL.md"
+  fi
 fi
 
 cd "$WORKSPACE"
