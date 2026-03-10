@@ -12,6 +12,7 @@ app.use(cors({
     'https://www.saidprotocol.com',
     'https://saidprotocol.com',
     'https://app.saidprotocol.com',
+    'https://agent-creation-new-production.up.railway.app',
     'http://localhost:3000',
     'http://localhost:3001',
   ],
