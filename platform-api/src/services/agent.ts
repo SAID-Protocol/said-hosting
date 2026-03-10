@@ -102,7 +102,6 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         programMd: payload.program_md ?? null,
         config: payload.config ? JSON.stringify(payload.config) : null,
         gatewayTokenHash,
-        gatewayToken,
         aiCreditsLimit: tierConfig.aiCredits,
         openrouterKeyHash: orKey.hash,
         fundingStatus: 'pending',
@@ -116,7 +115,9 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
       },
     });
     logActivity(agentId, 'system', `Agent created on Fly app ${appName} with OpenRouter key (limit: $${orKey.limit}/mo)`);
-    return agent;
+    
+    // Return agent with plaintext gateway token (only time it's exposed)
+    return { ...agent, gatewayToken };
   } catch (error) {
     if (orKeyHash) { try { await deleteKey(orKeyHash); } catch {} }
     if (machineId) { try { await deleteMachine(appName, machineId); } catch {} }

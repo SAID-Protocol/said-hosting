@@ -191,12 +191,25 @@ agentRouter.post('/:id/chat', async (req, res) => {
       return;
     }
 
-    const gatewayToken = agent.gatewayToken;
+    // Require gateway token from client
+    const providedToken = req.headers['x-gateway-token'] as string | undefined;
+    if (!providedToken) {
+      res.status(401).json({ error: 'x-gateway-token header is required' });
+      return;
+    }
+
+    // Verify token against stored hash
+    const { verifyGatewayToken } = await import('../utils/auth');
+    if (!agent.gatewayTokenHash || !verifyGatewayToken(providedToken, agent.gatewayTokenHash)) {
+      res.status(403).json({ error: 'Invalid gateway token' });
+      return;
+    }
+
     const response = await fetch(`https://${agent.flyAppName}.fly.dev/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(gatewayToken ? { 'Authorization': `Bearer ${gatewayToken}` } : {}),
+        'Authorization': `Bearer ${providedToken}`,
       },
       body: JSON.stringify({
         model: 'openrouter/anthropic/claude-sonnet-4-5',

@@ -7,15 +7,24 @@ import { agentRouter } from './routes/agents';
 const app = express();
 const PORT = process.env.PORT || 3002;
 
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? [
+      'https://www.saidprotocol.com',
+      'https://saidprotocol.com',
+      'https://app.saidprotocol.com',
+      'https://agent-creation-new-production.up.railway.app',
+    ]
+  : [
+      'https://www.saidprotocol.com',
+      'https://saidprotocol.com',
+      'https://app.saidprotocol.com',
+      'https://agent-creation-new-production.up.railway.app',
+      'http://localhost:3000',
+      'http://localhost:3001',
+    ];
+
 app.use(cors({
-  origin: [
-    'https://www.saidprotocol.com',
-    'https://saidprotocol.com',
-    'https://app.saidprotocol.com',
-    'https://agent-creation-new-production.up.railway.app',
-    'http://localhost:3000',
-    'http://localhost:3001',
-  ],
+  origin: allowedOrigins,
   credentials: true,
 }));
 app.use(express.json());
