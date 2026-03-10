@@ -77,13 +77,29 @@ export async function createApp(appName: string): Promise<FlyAppResponse> {
     throw new Error('FLY_ORG is required');
   }
 
-  return flyRequest<FlyAppResponse>('/apps', {
+  const app = await flyRequest<FlyAppResponse>('/apps', {
     method: 'POST',
     body: JSON.stringify({
       app_name: appName,
       org_slug: org,
     }),
   });
+
+  // Allocate public IPs so the app is reachable at {appName}.fly.dev
+  try {
+    await flyRequest(`/apps/${appName}/ips`, {
+      method: 'POST',
+      body: JSON.stringify({ type: 'shared_v4' }),
+    });
+    await flyRequest(`/apps/${appName}/ips`, {
+      method: 'POST',
+      body: JSON.stringify({ type: 'v6' }),
+    });
+  } catch (err) {
+    console.warn(`[fly] IP allocation warning for ${appName}:`, err);
+  }
+
+  return app;
 }
 
 export async function createVolume(appName: string, volumeName: string, sizeGb: number): Promise<FlyVolumeResponse> {
