@@ -94,7 +94,6 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
     const agent = await prisma.agent.create({
       data: {
         id: agentId,
-        userId,
         name: payload.name.trim(),
         flyMachineId: machine.id,
         flyAppName: appName,
@@ -108,6 +107,12 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         openrouterKeyHash: orKey.hash,
         fundingStatus: 'pending',
         fundingAmountUsdc: getFundingAmountUsdc(tier),
+        user: {
+          connectOrCreate: {
+            where: { id: userId },
+            create: { id: userId, tier: 'pro' },
+          },
+        },
       },
     });
     logActivity(agentId, 'system', `Agent created on Fly app ${appName} with OpenRouter key (limit: $${orKey.limit}/mo)`);
