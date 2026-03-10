@@ -8,16 +8,15 @@ RUN apt-get update && apt-get install -y \
   sqlite3 \
   && rm -rf /var/lib/apt/lists/*
 
-# Install OpenClaw globally
-RUN npm install -g openclaw@latest
+# Install OpenClaw + Solana bootstrap dependencies globally
+RUN npm install -g openclaw@latest @solana/web3.js @solana/spl-token tweetnacl bs58
 
 # Create agent workspace
-RUN mkdir -p /agent/workspace /agent/data /agent/scripts
+RUN mkdir -p /agent/workspace /agent/scripts /data
 
-# Install SAID identity bootstrap dependencies (local to scripts dir for ESM resolution)
+# Install script-local dependencies too so ESM scripts resolve reliably in-container
 WORKDIR /agent/scripts
-RUN npm init -y && npm install @solana/web3.js bs58 tweetnacl
-WORKDIR /agent/workspace
+RUN npm init -y && npm install @solana/web3.js @solana/spl-token tweetnacl bs58
 
 # Set working directory
 WORKDIR /agent/workspace
@@ -31,8 +30,8 @@ COPY scripts/ /agent/scripts/
 COPY entrypoint.sh /agent/entrypoint.sh
 RUN chmod +x /agent/entrypoint.sh
 
-# Agent workspace is the persistent volume mount point
-VOLUME ["/agent/data"]
+# Persistent Fly volume mount point
+VOLUME ["/data"]
 
 # OpenClaw gateway port
 EXPOSE 18789
@@ -43,7 +42,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # Run as non-root
 RUN useradd -m -s /bin/bash agent
-RUN chown -R agent:agent /agent
+RUN chown -R agent:agent /agent /data
 USER agent
 
 ENTRYPOINT ["/agent/entrypoint.sh"]

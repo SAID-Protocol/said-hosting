@@ -2,24 +2,35 @@
 
 /**
  * SAID Agent Identity Bootstrap
- * 
- * Runs on first boot inside the container.
- * 1. Generates a Solana keypair (saved to persistent volume)
- * 2. Registers on SAID Protocol (pending/free)
- * 3. Writes public key to a status file for the Platform API to read
+ *
+ * Runs on container boot.
+ * 1. Generates a Solana keypair on first boot (saved to persistent volume)
+ * 2. Exports the public key for downstream shell scripts
+ * 3. Registers on SAID Protocol (pending/free)
  * 4. If funded, does on-chain registration + verification
  */
 
-import { Keypair, Connection, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
+import {
+  Keypair,
+  Connection,
+  PublicKey,
+  SystemProgram,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from '@solana/web3.js';
 import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-const DATA_DIR = process.env.AGENT_DATA_DIR || '/agent/data';
-const WALLET_PATH = path.join(DATA_DIR, 'wallet.json');
-const STATUS_PATH = path.join(DATA_DIR, 'said-identity.json');
+const DATA_DIR = process.env.AGENT_DATA_DIR || '/data';
+const WALLET_PATH = process.env.SAID_WALLET_PATH || path.join(DATA_DIR, 'wallet.json');
+const STATUS_PATH = process.env.SAID_IDENTITY_STATUS_PATH || path.join(DATA_DIR, 'said-identity.json');
+const ENV_PATH = process.env.SAID_IDENTITY_ENV_PATH || path.join(DATA_DIR, 'identity.env');
 const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://newest-restless-mansion.solana-mainnet.quiknode.pro/af7d979a4ef8558eb0da3166819eac8af0d3dd2b';
+const RPC_URL =
+  process.env.SOLANA_RPC_URL ||
+  'https://newest-restless-mansion.solana-mainnet.quiknode.pro/af7d979a4ef8558eb0da3166819eac8af0d3dd2b';
 const PROGRAM_ID = new PublicKey('5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G');
 
 const AGENT_NAME = process.env.SAID_AGENT_NAME || 'SAID Agent';
@@ -34,34 +45,52 @@ function getDiscriminator(name) {
 }
 
 function getAgentPDA(owner) {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('agent'), owner.toBuffer()],
-    PROGRAM_ID
-  );
+  return PublicKey.findProgramAddressSync([Buffer.from('agent'), owner.toBuffer()], PROGRAM_ID);
 }
 
 function getTreasuryPDA() {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('treasury')],
-    PROGRAM_ID
-  );
+  return PublicKey.findProgramAddressSync([Buffer.from('treasury')], PROGRAM_ID);
+}
+
+function ensureDataDir() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function writeIdentityEnv(wallet) {
+  const content = [
+    `SAID_IDENTITY_WALLET=${wallet}`,
+    `SAID_WALLET_ADDRESS=${wallet}`,
+    `SAID_WALLET_PATH=${WALLET_PATH}`,
+    `SAID_IDENTITY_STATUS_PATH=${STATUS_PATH}`,
+  ].join('\n') + '\n';
+
+  fs.writeFileSync(ENV_PATH, content, { mode: 0o600 });
+  try {
+    fs.chmodSync(ENV_PATH, 0o600);
+  } catch {}
+  log(`Identity env written: ${ENV_PATH}`);
 }
 
 // Step 1: Generate or load keypair
 function ensureKeypair() {
+  ensureDataDir();
+
   if (fs.existsSync(WALLET_PATH)) {
-    log('Wallet exists, loading...');
+    log(`Wallet exists, loading from ${WALLET_PATH}...`);
     const raw = JSON.parse(fs.readFileSync(WALLET_PATH, 'utf8'));
-    return Keypair.fromSecretKey(Uint8Array.from(raw));
+    const keypair = Keypair.fromSecretKey(Uint8Array.from(raw));
+    writeIdentityEnv(keypair.publicKey.toString());
+    return { keypair, created: false };
   }
 
   log('Generating new Solana keypair...');
   const keypair = Keypair.generate();
   fs.mkdirSync(path.dirname(WALLET_PATH), { recursive: true });
   fs.writeFileSync(WALLET_PATH, JSON.stringify(Array.from(keypair.secretKey)));
-  fs.chmodSync(WALLET_PATH, 0o600); // Owner read/write only
+  fs.chmodSync(WALLET_PATH, 0o600);
+  writeIdentityEnv(keypair.publicKey.toString());
   log(`Wallet created: ${keypair.publicKey.toString()}`);
-  return keypair;
+  return { keypair, created: true };
 }
 
 // Step 2: Register on SAID API (free, off-chain)
@@ -82,13 +111,14 @@ async function registerOnAPI(wallet) {
     if (res.ok && data.success) {
       log(`SAID identity registered (pending): PDA ${data.pda || 'N/A'}`);
       return { success: true, pda: data.pda, profile: data.profile };
-    } else if (res.status === 409) {
+    }
+    if (res.status === 409) {
       log('Already registered on SAID API');
       return { success: true, existing: true };
-    } else {
-      log(`Registration note: ${data.error || 'unknown'}`);
-      return { success: false, error: data.error };
     }
+
+    log(`Registration note: ${data.error || 'unknown'}`);
+    return { success: false, error: data.error };
   } catch (err) {
     log(`Registration failed: ${err.message}`);
     return { success: false, error: err.message };
@@ -101,7 +131,6 @@ async function registerOnChain(keypair) {
   const owner = keypair.publicKey;
   const wallet = owner.toString();
 
-  // Check if already registered
   const [agentPDA] = getAgentPDA(owner);
   const acct = await connection.getAccountInfo(agentPDA);
   if (acct) {
@@ -109,9 +138,8 @@ async function registerOnChain(keypair) {
     return { success: true, existing: true };
   }
 
-  // Check balance
   const balance = await connection.getBalance(owner);
-  const needed = 0.005 * 1e9; // ~0.005 SOL for registration
+  const needed = 0.005 * 1e9;
   if (balance < needed) {
     log(`Insufficient SOL for on-chain registration (have ${(balance / 1e9).toFixed(4)}, need ~0.005)`);
     return { success: false, error: 'insufficient_funds' };
@@ -159,7 +187,6 @@ async function getVerified(keypair) {
   const [agentPDA] = getAgentPDA(owner);
   const [treasuryPDA] = getTreasuryPDA();
 
-  // Check balance
   const balance = await connection.getBalance(owner);
   const cost = 0.01 * 1e9;
   if (balance < cost + 5000) {
@@ -199,14 +226,22 @@ async function getVerified(keypair) {
 
 // Step 5: Report status back to Platform API
 async function reportStatus(wallet, status) {
-  // Write locally for the dashboard/terminal to read
-  fs.writeFileSync(STATUS_PATH, JSON.stringify({
-    wallet,
-    ...status,
-    updatedAt: new Date().toISOString(),
-  }, null, 2));
+  ensureDataDir();
+  fs.writeFileSync(
+    STATUS_PATH,
+    JSON.stringify(
+      {
+        wallet,
+        ...status,
+        walletPath: WALLET_PATH,
+        envPath: ENV_PATH,
+        updatedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
 
-  // Report to Platform API if configured
   const platformApi = process.env.SAID_PLATFORM_API;
   const agentId = process.env.SAID_AGENT_ID;
   const apiKey = process.env.SAID_PLATFORM_API_KEY;
@@ -225,47 +260,68 @@ async function reportStatus(wallet, status) {
   }
 }
 
-// Main
 async function main() {
   log('=== SAID Identity Bootstrap ===');
   log(`Agent: ${AGENT_NAME}`);
 
-  // 1. Keypair
-  const keypair = ensureKeypair();
+  const { keypair, created } = ensureKeypair();
   const wallet = keypair.publicKey.toString();
+  process.env.SAID_IDENTITY_WALLET = wallet;
+  process.env.SAID_WALLET_ADDRESS = wallet;
+
   log(`Wallet: ${wallet}`);
+  log(created ? 'Wallet generated on this boot.' : 'Wallet already present; bootstrap is idempotent.');
 
   const status = {
     wallet,
+    created,
     registered: false,
     onChain: false,
     verified: false,
   };
 
-  // 2. API registration (always free)
   const apiResult = await registerOnAPI(wallet);
   status.registered = apiResult.success;
 
-  // 3. On-chain registration (if funded)
   const chainResult = await registerOnChain(keypair);
   status.onChain = chainResult.success;
 
-  // 4. Verification (if funded and registered on-chain)
   if (status.onChain) {
     const verifyResult = await getVerified(keypair);
     status.verified = verifyResult.success;
   }
 
-  // 5. Report
   await reportStatus(wallet, status);
 
   log('=== Bootstrap complete ===');
   log(`  Registered: ${status.registered ? '✅' : '❌'}`);
   log(`  On-chain:   ${status.onChain ? '✅' : '⏳ (fund wallet with ~0.02 SOL)'}`);
   log(`  Verified:   ${status.verified ? '✅' : '⏳ (needs on-chain first)'}`);
+  console.log(`SAID_IDENTITY_WALLET=${wallet}`);
 }
 
-main().catch(err => {
+main().catch(async (err) => {
   log(`Bootstrap error: ${err.message}`);
-  process.exit(0); // Don't crash the container — agent can still run without identity
+
+  try {
+    if (fs.existsSync(WALLET_PATH)) {
+      const raw = JSON.parse(fs.readFileSync(WALLET_PATH, 'utf8'));
+      const keypair = Keypair.fromSecretKey(Uint8Array.from(raw));
+      const wallet = keypair.publicKey.toString();
+      writeIdentityEnv(wallet);
+      await reportStatus(wallet, {
+        wallet,
+        created: false,
+        registered: false,
+        onChain: false,
+        verified: false,
+        error: err.message,
+      });
+      console.log(`SAID_IDENTITY_WALLET=${wallet}`);
+    }
+  } catch (reportErr) {
+    log(`Failed to write fallback identity state: ${reportErr.message}`);
+  }
+
+  process.exit(0);
 });
