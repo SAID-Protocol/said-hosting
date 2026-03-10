@@ -49,6 +49,6 @@ export type TierConfig = {
 
 export const TIER_CONFIGS: Record<string, TierConfig> = {
   starter: { cpu: 'shared-cpu-1x', memory: 512, volumeSize: 1, aiCredits: 5 },
-  pro: { cpu: 'shared-cpu-1x', memory: 1024, volumeSize: 5, aiCredits: 15 },
-  power: { cpu: 'shared-cpu-2x', memory: 2048, volumeSize: 10, aiCredits: 50 },
+  pro: { cpu: 'shared-cpu-1x', memory: 512, volumeSize: 5, aiCredits: 15 }, // Reduced from 1024 to avoid region capacity issues
+  power: { cpu: 'shared-cpu-1x', memory: 1024, volumeSize: 10, aiCredits: 50 }, // Reduced from 2048
 };
