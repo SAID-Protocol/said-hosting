@@ -31,6 +31,7 @@ model Agent {
   programMd         String?  @map("program_md")
   config            String?
   gatewayTokenHash  String?  @map("gateway_token_hash")
+  gatewayToken      String?  @map("gateway_token")
   aiCreditsUsed     Float    @default(0) @map("ai_credits_used")
   aiCreditsLimit    Float    @default(5) @map("ai_credits_limit")
   openrouterKeyHash String?  @map("openrouter_key_hash")

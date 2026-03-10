@@ -133,6 +133,24 @@ export async function createMachine(params: {
           cpus: normalizeCpuCount(tierConfig.cpu),
           memory_mb: tierConfig.memory,
         },
+        services: [
+          {
+            ports: [
+              {
+                port: 443,
+                handlers: ['tls', 'http'],
+              },
+              {
+                port: 80,
+                handlers: ['http'],
+              },
+            ],
+            protocol: 'tcp',
+            internal_port: 18789,
+            autostart: true,
+            autostop: 'off',
+          },
+        ],
         mounts: [
           {
             volume: params.volumeId,

@@ -162,9 +162,13 @@ agentRouter.post('/:id/chat', async (req, res) => {
       return;
     }
 
+    const gatewayToken = agent.gatewayToken;
     const response = await fetch(`https://${agent.flyAppName}.fly.dev/hooks/wake`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(gatewayToken ? { 'Authorization': `Bearer ${gatewayToken}` } : {}),
+      },
       body: JSON.stringify({ message }),
     });
 

@@ -46,7 +46,6 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
     });
     machineId = machine.id;
 
-    // Only store hashes — raw tokens are passed to the container env and never persisted by us
     const agent = await prisma.agent.create({
       data: {
         id: agentId,
@@ -59,6 +58,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         programMd: payload.program_md ?? null,
         config: payload.config ? JSON.stringify(payload.config) : null,
         gatewayTokenHash,
+        gatewayToken, // Stored for chat proxy — needed to auth with agent's OpenClaw gateway
         aiCreditsLimit: tierConfig.aiCredits,
         openrouterKeyHash: orKey.hash,
       },

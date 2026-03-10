@@ -27,6 +27,7 @@ if [ -n "$OPENROUTER_API_KEY" ]; then
     const config = {
       gateway: {
         port: 18789,
+        bind: 'all',
         mode: 'local',
         auth: { mode: 'token', token: process.env.OPENCLAW_GATEWAY_TOKEN || '$GATEWAY_TOKEN' }
       },
@@ -41,6 +42,7 @@ else
     const config = {
       gateway: {
         port: 18789,
+        bind: 'all',
         mode: 'local',
         auth: { mode: 'token', token: '$GATEWAY_TOKEN' }
       },
