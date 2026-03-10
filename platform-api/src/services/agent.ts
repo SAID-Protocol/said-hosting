@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { prisma } from '../db';
 import { CreateAgentRequest, TIER_CONFIGS } from '../types';
 import { createApp, createMachine, createVolume, deleteApp, deleteMachine, getMachine, startMachine, stopMachine } from './fly';
-import { registerAgent, verifyAgent } from './said';
+import { registerAgent } from './said';
 import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
 import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 import { generateWorkspace, WorkspaceConfig } from './workspace';
@@ -75,6 +75,15 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
 
     await createApp(appName);
     const volume = await createVolume(appName, volumeName, tierConfig.volumeSize);
+
+    const said = await registerAgent(payload.name.trim(), {
+      description: payload.description || `Hosted SAID agent: ${payload.name.trim()}`,
+      capabilities: ['messaging', 'web-search'],
+    });
+
+    if (!said.success) {
+      throw new Error(said.error || 'Failed to register SAID identity');
+    }
     const machine = await createMachine({
       appName,
       agentId,
@@ -99,6 +108,8 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         flyAppName: appName,
         status: 'running',
         tier,
+        walletAddress: said.walletAddress,
+        saidPda: said.saidPda ?? null,
         programMd: payload.program_md ?? null,
         config: payload.config ? JSON.stringify(payload.config) : null,
         gatewayTokenHash,

@@ -4,7 +4,6 @@ import { createAgent, deleteAgent, getAgentById, getAgentLogs, getAgentStatus, l
 import { prisma } from '../db';
 import { CreateAgentRequest } from '../types';
 import { getKeyInfo } from '../services/openrouter';
-import { registerAgent, verifyAgent } from '../services/said';
 
 export const agentRouter = Router();
 
@@ -124,69 +123,6 @@ agentRouter.get('/:id/usage', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch usage' });
-  }
-});
-
-// Called by the agent container on first boot to report its wallet
-agentRouter.post('/:id/identity', async (req, res) => {
-  try {
-    const wallet = req.body?.wallet;
-    if (typeof wallet !== 'string' || !wallet.trim()) {
-      res.status(400).json({ error: 'wallet is required' });
-      return;
-    }
-
-    const updated = await prisma.agent.update({
-      where: { id: req.params.id },
-      data: {
-        saidIdentity: wallet.trim(),
-        ...(typeof req.body?.saidPda === 'string' && req.body.saidPda.trim() ? { saidPda: req.body.saidPda.trim() } : {}),
-        ...(typeof req.body?.saidRegisteredAt === 'string' ? { saidRegisteredAt: new Date(req.body.saidRegisteredAt) } : {}),
-        ...(typeof req.body?.saidVerifiedAt === 'string' ? { saidVerifiedAt: new Date(req.body.saidVerifiedAt) } : {}),
-        ...(typeof req.body?.saidLastError === 'string' ? { saidLastError: req.body.saidLastError } : {}),
-      },
-    });
-
-    // Best-effort automatic SAID on-chain registration once the hosted agent reports its wallet.
-    void (async () => {
-      try {
-        if (updated.saidPda && updated.saidVerifiedAt) return;
-
-        const registration = await registerAgent(updated.name, wallet.trim(), {
-          description: updated.programMd || `Hosted SAID agent: ${updated.name}`,
-          capabilities: ['chat', 'assistant', 'hosting'],
-          platform: 'said-hosting',
-        });
-
-        if (!registration.success) {
-          await prisma.agent.update({
-            where: { id: updated.id },
-            data: {
-              saidPda: registration.pda || updated.saidPda,
-              saidLastError: registration.error || 'SAID registration failed',
-            },
-          });
-          return;
-        }
-
-        await prisma.agent.update({
-          where: { id: updated.id },
-          data: {
-            saidPda: registration.pda,
-            saidLastError: registration.transaction ? 'SAID tx prepared; agent wallet must sign + submit via bootstrap/retry flow' : null,
-          },
-        });
-      } catch (error) {
-        await prisma.agent.update({
-          where: { id: updated.id },
-          data: { saidLastError: error instanceof Error ? error.message : 'SAID registration failed' },
-        }).catch(() => undefined);
-      }
-    })();
-
-    res.json({ ok: true, wallet: wallet.trim(), saidPda: req.body?.saidPda ?? null });
-  } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update identity' });
   }
 });
 

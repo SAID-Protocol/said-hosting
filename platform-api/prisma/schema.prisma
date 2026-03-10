@@ -27,11 +27,8 @@ model Agent {
   flyAppName        String?  @map("fly_app_name")
   status            String   @default("creating")
   tier              String   @default("starter")
-  saidIdentity      String?  @map("said_identity")
+  walletAddress     String?  @map("wallet_address")
   saidPda           String?  @map("said_pda")
-  saidRegisteredAt  DateTime? @map("said_registered_at")
-  saidVerifiedAt    DateTime? @map("said_verified_at")
-  saidLastError     String?  @map("said_last_error")
   programMd         String?  @map("program_md")
   config            String?
   gatewayTokenHash  String?  @map("gateway_token_hash")
