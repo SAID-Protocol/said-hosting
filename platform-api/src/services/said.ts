@@ -1,102 +1,221 @@
-import { Keypair } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
+import {
+  createAssociatedTokenAccountIdempotent,
+  createTransferCheckedInstruction,
+  getAssociatedTokenAddressSync,
+} from '@solana/spl-token';
 import bs58 from 'bs58';
-import nacl from 'tweetnacl';
 
 const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+const SAID_PLATFORM_KEY = process.env.SAID_HOSTING_API_KEY || '';
+const SOLANA_RPC_URL =
+  process.env.SOLANA_RPC_URL ||
+  'https://newest-restless-mansion.solana-mainnet.quiknode.pro/af7d979a4ef8558eb0da3166819eac8af0d3dd2b';
+const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+const USDC_DECIMALS = 6;
+const FUNDING_AMOUNTS: Record<string, number> = {
+  starter: 2,
+  pro: 5,
+  power: 15,
+};
 
-export interface SaidMetadata {
-  description?: string;
-  twitter?: string;
-  website?: string;
-  capabilities?: string[];
-}
-
-export interface SaidRegistrationResult {
-  success: boolean;
-  walletAddress: string;
-  secretKeyBase58: string;
-  saidPda?: string;
-  profile?: string;
-  error?: string;
-}
-
-interface PendingRegisterResponse {
+interface SaidRegisterResponse {
   success?: boolean;
+  unsignedTransaction?: string;
+  unsignedTx?: string;
+  transaction?: string;
   pda?: string;
-  profile?: string;
   error?: string;
 }
 
-function getRegistrationMessage(wallet: string, name: string, timestamp: number): string {
-  return `SAID:register:${wallet}:${name}:${timestamp}`;
+interface SaidConfirmResponse {
+  success?: boolean;
+  signature?: string;
+  txSignature?: string;
+  pda?: string;
+  wallet?: string;
+  error?: string;
+  [key: string]: unknown;
 }
 
-function signMessage(message: string, keypair: Keypair): string {
-  const messageBytes = new TextEncoder().encode(message);
-  const signature = nacl.sign.detached(messageBytes, keypair.secretKey);
-  return bs58.encode(signature);
-}
+export type SaidRegisterRequest = {
+  wallet: string;
+  name: string;
+  description: string;
+  capabilities?: string[];
+};
 
-export function generateKeypair(): { keypair: Keypair; walletAddress: string; secretKeyBase58: string } {
-  const keypair = Keypair.generate();
+export type SaidRegisterResult = {
+  success: boolean;
+  unsignedTransaction?: string;
+  pda?: string;
+  error?: string;
+};
+
+export type SaidConfirmRequest = {
+  signedTransaction: string;
+};
+
+export type SaidConfirmResult = {
+  success: boolean;
+  saidPda?: string;
+  signature?: string;
+  wallet?: string;
+  raw?: SaidConfirmResponse;
+  error?: string;
+};
+
+export type FundingResult = {
+  success: boolean;
+  amountUsdc: number;
+  signature?: string;
+  error?: string;
+};
+
+function getPlatformHeaders(): HeadersInit {
+  if (!SAID_PLATFORM_KEY) {
+    throw new Error('SAID_HOSTING_API_KEY is required');
+  }
+
   return {
-    keypair,
-    walletAddress: keypair.publicKey.toBase58(),
-    secretKeyBase58: bs58.encode(keypair.secretKey),
+    'Content-Type': 'application/json',
+    'X-Platform-Key': SAID_PLATFORM_KEY,
   };
 }
 
-export async function registerAgent(agentName: string, metadata: SaidMetadata = {}): Promise<SaidRegistrationResult> {
-  const { keypair, walletAddress, secretKeyBase58 } = generateKeypair();
+export function getFundingAmountUsdc(tier: string): number {
+  return FUNDING_AMOUNTS[tier] ?? FUNDING_AMOUNTS.starter;
+}
 
+export async function registerHostedAgent(payload: SaidRegisterRequest): Promise<SaidRegisterResult> {
   try {
-    const timestamp = Date.now();
-    const message = getRegistrationMessage(walletAddress, agentName, timestamp);
-    const signature = signMessage(message, keypair);
-
-    const response = await fetch(`${SAID_API}/api/register/pending`, {
+    const response = await fetch(`${SAID_API}/api/platforms/said-hosting/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        wallet: walletAddress,
-        name: agentName,
-        description: metadata.description || `Hosted SAID agent: ${agentName}`,
-        twitter: metadata.twitter,
-        website: metadata.website,
-        capabilities: metadata.capabilities || ['messaging', 'web-search'],
-        signature,
-        timestamp,
-      }),
+      headers: getPlatformHeaders(),
+      body: JSON.stringify(payload),
     });
 
-    const data = await response.json() as PendingRegisterResponse;
+    const data = (await response.json()) as SaidRegisterResponse;
+    const unsignedTransaction = data.unsignedTransaction || data.unsignedTx || data.transaction;
 
-    if (response.ok && data.success) {
+    if (!response.ok || !data.success || !unsignedTransaction) {
       return {
-        success: true,
-        walletAddress,
-        secretKeyBase58,
-        saidPda: data.pda,
-        profile: data.profile,
+        success: false,
+        error: data.error || `SAID register failed with status ${response.status}`,
       };
     }
 
     return {
-      success: false,
-      walletAddress,
-      secretKeyBase58,
-      error: data.error || 'Registration failed',
+      success: true,
+      unsignedTransaction,
+      pda: data.pda,
     };
   } catch (error) {
     return {
       success: false,
-      walletAddress,
-      secretKeyBase58,
       error: error instanceof Error ? error.message : 'Network error',
     };
   }
 }
 
-export async function verifyAgent(agentPDA: string): Promise<string> {
-  return agentPDA;
+export async function confirmHostedAgent(payload: SaidConfirmRequest): Promise<SaidConfirmResult> {
+  try {
+    const response = await fetch(`${SAID_API}/api/platforms/said-hosting/confirm`, {
+      method: 'POST',
+      headers: getPlatformHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    const data = (await response.json()) as SaidConfirmResponse;
+
+    if (!response.ok || !data.success) {
+      return {
+        success: false,
+        error: data.error || `SAID confirm failed with status ${response.status}`,
+      };
+    }
+
+    return {
+      success: true,
+      saidPda: data.pda,
+      signature: data.signature || data.txSignature,
+      wallet: data.wallet,
+      raw: data,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Network error',
+    };
+  }
+}
+
+function getFundingKeypair(): Keypair {
+  const encoded = process.env.FUNDING_WALLET_KEYPAIR;
+  if (!encoded) {
+    throw new Error('FUNDING_WALLET_KEYPAIR is required');
+  }
+
+  return Keypair.fromSecretKey(bs58.decode(encoded));
+}
+
+export async function fundAgentWallet(agentWallet: string, tier: string): Promise<FundingResult> {
+  const amountUsdc = getFundingAmountUsdc(tier);
+
+  try {
+    const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+    const fundingKeypair = getFundingKeypair();
+    const owner = fundingKeypair.publicKey;
+    const destination = new PublicKey(agentWallet);
+
+    const sourceAta = getAssociatedTokenAddressSync(USDC_MINT, owner);
+    const destinationAta = getAssociatedTokenAddressSync(USDC_MINT, destination);
+
+    await createAssociatedTokenAccountIdempotent(
+      connection,
+      fundingKeypair,
+      USDC_MINT,
+      destination,
+    );
+
+    const latest = await connection.getLatestBlockhash('confirmed');
+    const transferTx = new Transaction({
+      feePayer: owner,
+      blockhash: latest.blockhash,
+      lastValidBlockHeight: latest.lastValidBlockHeight,
+    }).add(
+      createTransferCheckedInstruction(
+        sourceAta,
+        USDC_MINT,
+        destinationAta,
+        owner,
+        Math.round(amountUsdc * 10 ** USDC_DECIMALS),
+        USDC_DECIMALS,
+      ),
+    );
+
+    const signature = await connection.sendTransaction(transferTx, [fundingKeypair], {
+      skipPreflight: false,
+    });
+    await connection.confirmTransaction(
+      {
+        signature,
+        blockhash: latest.blockhash,
+        lastValidBlockHeight: latest.lastValidBlockHeight,
+      },
+      'confirmed',
+    );
+
+    return {
+      success: true,
+      amountUsdc,
+      signature,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      amountUsdc,
+      error: error instanceof Error ? error.message : 'Funding failed',
+    };
+  }
 }

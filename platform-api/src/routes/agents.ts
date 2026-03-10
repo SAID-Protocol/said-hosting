@@ -1,13 +1,69 @@
 import { Router } from 'express';
-import { authMiddleware } from '../middleware/auth';
-import { createAgent, deleteAgent, getAgentById, getAgentLogs, getAgentStatus, listAgents, startAgent, stopAgent, updateAgent } from '../services/agent';
-import { prisma } from '../db';
+import { createAgent, deleteAgent, getAgentById, getAgentLogs, getAgentStatus, listAgents, startAgent, stopAgent, updateAgent, registerAgentSaid, confirmAgentSaid } from '../services/agent';
 import { CreateAgentRequest } from '../types';
 import { getKeyInfo } from '../services/openrouter';
 
 export const agentRouter = Router();
 
-agentRouter.use(authMiddleware);
+agentRouter.post('/:id/register-said', async (req, res) => {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.API_KEY) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const walletAddress = req.body?.walletAddress;
+    if (typeof walletAddress !== 'string' || !walletAddress.trim()) {
+      res.status(400).json({ error: 'walletAddress is required' });
+      return;
+    }
+
+    const result = await registerAgentSaid(req.params.id, walletAddress.trim());
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to register SAID identity' });
+  }
+});
+
+agentRouter.post('/:id/confirm-said', async (req, res) => {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.API_KEY) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const signedTransaction = req.body?.signedTransaction;
+    if (typeof signedTransaction !== 'string' || !signedTransaction.trim()) {
+      res.status(400).json({ error: 'signedTransaction is required' });
+      return;
+    }
+
+    const result = await confirmAgentSaid(req.params.id, signedTransaction.trim());
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to confirm SAID identity' });
+  }
+});
+
+agentRouter.use(async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  if (authHeader?.startsWith('Bearer ')) {
+    next();
+    return;
+  }
+
+  const apiKey = req.headers['x-api-key'];
+  if (typeof apiKey === 'string' && apiKey === process.env.API_KEY) {
+    (req as typeof req & { userId: string }).userId = 'default-user';
+    next();
+    return;
+  }
+
+  const { authMiddleware } = await import('../middleware/auth');
+  return authMiddleware(req, res, next);
+});
 
 agentRouter.post('/', async (req, res) => {
   try {
@@ -99,7 +155,6 @@ agentRouter.get('/:id/logs', async (req, res) => {
   }
 });
 
-// Get agent's OpenRouter usage stats
 agentRouter.get('/:id/usage', async (req, res) => {
   try {
     const userId = (req as typeof req & { userId: string }).userId;

@@ -20,24 +20,30 @@ model User {
 }
 
 model Agent {
-  id                String   @id @default(uuid())
-  userId            String   @map("user_id")
-  name              String
-  flyMachineId      String?  @map("fly_machine_id")
-  flyAppName        String?  @map("fly_app_name")
-  status            String   @default("creating")
-  tier              String   @default("starter")
-  walletAddress     String?  @map("wallet_address")
-  saidPda           String?  @map("said_pda")
-  programMd         String?  @map("program_md")
-  config            String?
-  gatewayTokenHash  String?  @map("gateway_token_hash")
-  gatewayToken      String?  @map("gateway_token")
-  aiCreditsUsed     Float    @default(0) @map("ai_credits_used")
-  aiCreditsLimit    Float    @default(5) @map("ai_credits_limit")
-  openrouterKeyHash String?  @map("openrouter_key_hash")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                   String   @id @default(uuid())
+  userId               String   @map("user_id")
+  name                 String
+  flyMachineId         String?  @map("fly_machine_id")
+  flyAppName           String?  @map("fly_app_name")
+  status               String   @default("creating")
+  tier                 String   @default("starter")
+  walletAddress        String?  @map("wallet_address")
+  saidPda              String?  @map("said_pda")
+  saidRegistrationTx   String?  @map("said_registration_tx")
+  fundingStatus        String?  @default("pending") @map("funding_status")
+  fundingAmountUsdc    Float?   @map("funding_amount_usdc")
+  fundingSignature     String?  @map("funding_signature")
+  fundingLastError     String?  @map("funding_last_error")
+  fundedAt             DateTime? @map("funded_at")
+  programMd            String?  @map("program_md")
+  config               String?
+  gatewayTokenHash     String?  @map("gateway_token_hash")
+  gatewayToken         String?  @map("gateway_token")
+  aiCreditsUsed        Float    @default(0) @map("ai_credits_used")
+  aiCreditsLimit       Float    @default(5) @map("ai_credits_limit")
+  openrouterKeyHash    String?  @map("openrouter_key_hash")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
   user     User       @relation(fields: [userId], references: [id])
   activity Activity[]

@@ -2,10 +2,10 @@ import crypto from 'crypto';
 import { prisma } from '../db';
 import { CreateAgentRequest, TIER_CONFIGS } from '../types';
 import { createApp, createMachine, createVolume, deleteApp, deleteMachine, getMachine, startMachine, stopMachine } from './fly';
-import { registerAgent } from './said';
 import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
 import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 import { generateWorkspace, WorkspaceConfig } from './workspace';
+import { confirmHostedAgent, fundAgentWallet, getFundingAmountUsdc, registerHostedAgent } from './said';
 
 function generateId(): string { return crypto.randomUUID(); }
 function shortId(id: string): string { return id.replace(/-/g, '').slice(0, 8); }
@@ -76,14 +76,6 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
     await createApp(appName);
     const volume = await createVolume(appName, volumeName, tierConfig.volumeSize);
 
-    const said = await registerAgent(payload.name.trim(), {
-      description: payload.description || `Hosted SAID agent: ${payload.name.trim()}`,
-      capabilities: ['messaging', 'web-search'],
-    });
-
-    if (!said.success) {
-      throw new Error(said.error || 'Failed to register SAID identity');
-    }
     const machine = await createMachine({
       appName,
       agentId,
@@ -108,14 +100,14 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         flyAppName: appName,
         status: 'running',
         tier,
-        walletAddress: said.walletAddress,
-        saidPda: said.saidPda ?? null,
         programMd: payload.program_md ?? null,
         config: payload.config ? JSON.stringify(payload.config) : null,
         gatewayTokenHash,
         gatewayToken,
         aiCreditsLimit: tierConfig.aiCredits,
         openrouterKeyHash: orKey.hash,
+        fundingStatus: 'pending',
+        fundingAmountUsdc: getFundingAmountUsdc(tier),
       },
     });
     logActivity(agentId, 'system', `Agent created on Fly app ${appName} with OpenRouter key (limit: $${orKey.limit}/mo)`);
@@ -126,6 +118,102 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
     try { await deleteApp(appName); } catch {}
     throw error;
   }
+}
+
+export async function registerAgentSaid(agentId: string, walletAddress: string) {
+  const agent = await prisma.agent.findUnique({ where: { id: agentId } });
+  if (!agent) throw new Error('Agent not found');
+
+  const registration = await registerHostedAgent({
+    wallet: walletAddress,
+    name: agent.name,
+    description: `Hosted SAID agent: ${agent.name}`,
+    capabilities: ['messaging', 'web-search'],
+  });
+
+  if (!registration.success || !registration.unsignedTransaction) {
+    throw new Error(registration.error || 'Failed to register SAID identity');
+  }
+
+  await prisma.agent.update({
+    where: { id: agentId },
+    data: {
+      walletAddress,
+      status: agent.status === 'creating' ? 'creating' : agent.status,
+      saidRegistrationTx: registration.unsignedTransaction,
+    },
+  });
+
+  logActivity(agentId, 'system', `Prepared SAID registration for wallet ${walletAddress}`);
+
+  return {
+    unsignedTransaction: registration.unsignedTransaction,
+    saidPda: registration.pda ?? null,
+  };
+}
+
+export async function confirmAgentSaid(agentId: string, signedTransaction: string) {
+  const agent = await prisma.agent.findUnique({ where: { id: agentId } });
+  if (!agent) throw new Error('Agent not found');
+
+  const confirmation = await confirmHostedAgent({ signedTransaction });
+  if (!confirmation.success) {
+    throw new Error(confirmation.error || 'Failed to confirm SAID identity');
+  }
+
+  const walletAddress = confirmation.wallet || agent.walletAddress;
+  const saidPda = confirmation.saidPda || agent.saidPda;
+
+  const updated = await prisma.agent.update({
+    where: { id: agentId },
+    data: {
+      walletAddress,
+      saidPda,
+      saidRegistrationTx: null,
+    },
+  });
+
+  logActivity(agentId, 'system', `Confirmed SAID registration${saidPda ? ` (${saidPda})` : ''}`);
+
+  let funding = await fundAgentWallet(walletAddress || '', agent.tier);
+  if (!walletAddress) {
+    funding = {
+      success: false,
+      amountUsdc: getFundingAmountUsdc(agent.tier),
+      error: 'Wallet address missing after SAID confirmation',
+    };
+  }
+
+  const fundedAgent = await prisma.agent.update({
+    where: { id: agentId },
+    data: funding.success
+      ? {
+          fundingStatus: 'funded',
+          fundingAmountUsdc: funding.amountUsdc,
+          fundingSignature: funding.signature,
+          fundingLastError: null,
+          fundedAt: new Date(),
+        }
+      : {
+          fundingStatus: 'failed',
+          fundingAmountUsdc: funding.amountUsdc,
+          fundingLastError: funding.error,
+        },
+  });
+
+  if (funding.success) {
+    logActivity(agentId, 'system', `Funded ${funding.amountUsdc} USDC (${funding.signature})`);
+  } else {
+    console.error(`[agents] Failed to fund agent ${agentId}: ${funding.error}`);
+    logActivity(agentId, 'error', `USDC funding failed: ${funding.error}`);
+  }
+
+  return {
+    agent: fundedAgent,
+    saidPda,
+    signature: confirmation.signature,
+    funding,
+  };
 }
 
 export async function listAgents(userId: string) {
