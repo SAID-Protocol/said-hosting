@@ -156,6 +156,12 @@ if ! curl -sf http://127.0.0.1:18789/v1/chat/completions -H "Authorization: Bear
     if (!cfg.gateway.http) cfg.gateway.http = {};
     if (!cfg.gateway.http.endpoints) cfg.gateway.http.endpoints = {};
     cfg.gateway.http.endpoints.chatCompletions = { enabled: true };
+    // Restore the original gateway token (OpenClaw may have generated a new one)
+    if (process.env.OPENCLAW_GATEWAY_TOKEN) {
+      cfg.gateway.auth = cfg.gateway.auth || {};
+      cfg.gateway.auth.mode = 'token';
+      cfg.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
+    }
     if (process.env.OPENROUTER_API_KEY) {
       cfg.agents = cfg.agents || {};
       cfg.agents.defaults = cfg.agents.defaults || {};
@@ -163,6 +169,10 @@ if ! curl -sf http://127.0.0.1:18789/v1/chat/completions -H "Authorization: Bear
       cfg.agents.defaults.model.primary = 'openrouter/anthropic/claude-sonnet-4-5';
       cfg.env = cfg.env || {};
       cfg.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+      // Add auth profile for OpenRouter
+      cfg.auth = cfg.auth || {};
+      cfg.auth.profiles = cfg.auth.profiles || {};
+      cfg.auth.profiles['openrouter:default'] = { provider: 'openrouter', mode: 'api_key' };
     }
     fs.writeFileSync('$OPENCLAW_DIR/openclaw.json', JSON.stringify(cfg, null, 2));
     console.log('[said-hosting] Config file patched');
