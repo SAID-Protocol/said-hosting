@@ -146,7 +146,7 @@ export async function createMachine(params: {
           SAID_AGENT_ID: params.agentId,
           SAID_AGENT_NAME: params.agentName ?? 'SAID Agent',
           SAID_AGENT_DESCRIPTION: params.agentDescription ?? '',
-          SAID_PLATFORM_API: 'https://said-platform-api.fly.dev',
+          SAID_PLATFORM_API: 'https://app.saidprotocol.com',
           SAID_PLATFORM_API_KEY: process.env.API_KEY ?? '',
           OPENCLAW_GATEWAY_TOKEN: gatewayToken,
           OPENROUTER_API_KEY: params.openRouterKey ?? '',
