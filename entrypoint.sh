@@ -119,9 +119,10 @@ if [ -n "$WORKSPACE_FILES_JSON" ]; then
   "
 else
   echo "[said-hosting] No WORKSPACE_FILES_JSON — using base config files"
-  for f in AGENTS.md SOUL.md; do
+  for f in AGENTS.md SOUL.md RESEARCH_WORKFLOW.md; do
     if [ -f "/agent/config/$f" ] && [ ! -f "$WORKSPACE/$f" ]; then
       cp "/agent/config/$f" "$WORKSPACE/$f"
+      echo "[said-hosting] Copied: $f"
     fi
   done
 
