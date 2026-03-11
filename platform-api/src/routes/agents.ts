@@ -205,24 +205,40 @@ agentRouter.post('/:id/chat', async (req, res) => {
       return;
     }
 
-    const response = await fetch(`https://${agent.flyAppName}.fly.dev/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${providedToken}`,
-      },
-      body: JSON.stringify({
-        model: 'openrouter/anthropic/claude-sonnet-4-5',
-        messages: [{ role: 'user', content: message }],
-      }),
-    });
+    // Add timeout to fetch (60 seconds for long-running agent responses)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-    const text = await response.text();
-    let data: unknown = text;
-    try { data = JSON.parse(text); } catch {}
+    try {
+      const response = await fetch(`https://${agent.flyAppName}.fly.dev/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${providedToken}`,
+        },
+        body: JSON.stringify({
+          model: 'openrouter/anthropic/claude-sonnet-4-5',
+          messages: [{ role: 'user', content: message }],
+        }),
+        signal: controller.signal,
+      });
 
-    res.status(response.status).json({ ok: response.ok, data });
+      clearTimeout(timeoutId);
+
+      const text = await response.text();
+      let data: unknown = text;
+      try { data = JSON.parse(text); } catch {}
+
+      res.status(response.status).json({ ok: response.ok, data });
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      throw fetchError;
+    }
   } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to proxy chat' });
+    console.error('[chat proxy error]', error);
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Failed to proxy chat',
+      details: error instanceof Error ? error.stack : undefined
+    });
   }
 });
