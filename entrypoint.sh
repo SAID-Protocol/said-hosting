@@ -1,9 +1,21 @@
 #!/bin/bash
 set -e
 
-WORKSPACE="/agent/data/workspace"
+# Auto-detect volume mount location (platform may mount at /data or /agent/data)
+if [ -d "/agent/data" ] && mountpoint -q "/agent/data" 2>/dev/null; then
+  DATA_DIR="/agent/data"
+elif [ -d "/data" ] && mountpoint -q "/data" 2>/dev/null; then
+  DATA_DIR="/data"
+elif [ -d "/agent/data" ]; then
+  # Fallback: use /agent/data even if not a mountpoint (for compatibility)
+  DATA_DIR="/agent/data"
+else
+  # Last resort
+  DATA_DIR="/data"
+fi
+
+WORKSPACE="$DATA_DIR/workspace"
 OPENCLAW_DIR="/home/agent/.openclaw"
-DATA_DIR="/agent/data"
 IDENTITY_ENV="$DATA_DIR/identity.env"
 
 mkdir -p "$WORKSPACE" "$OPENCLAW_DIR" "$DATA_DIR"

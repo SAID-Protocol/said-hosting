@@ -30,8 +30,8 @@ COPY scripts/ /agent/scripts/
 COPY entrypoint.sh /agent/entrypoint.sh
 RUN chmod +x /agent/entrypoint.sh
 
-# Persistent Fly volume mount point
-VOLUME ["/data"]
+# Persistent Fly volume mount point (matches fly.toml mount destination)
+VOLUME ["/agent/data"]
 
 # OpenClaw gateway port
 EXPOSE 18789
