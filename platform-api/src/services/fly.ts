@@ -1,7 +1,7 @@
 import { TIER_CONFIGS } from '../types';
 
 const FLY_API_BASE = 'https://api.machines.dev/v1';
-const AGENT_IMAGE = 'registry.fly.io/said-agent-test:deployment-MMLIDS0N';
+const AGENT_IMAGE = 'registry.fly.io/said-agent-test:deployment-MMLISOOK';
 
 type TierKey = 'starter' | 'pro' | 'power';
 
