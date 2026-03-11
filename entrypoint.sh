@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-WORKSPACE="/data/workspace"
+WORKSPACE="/agent/data/workspace"
 OPENCLAW_DIR="/home/agent/.openclaw"
-DATA_DIR="/data"
+DATA_DIR="/agent/data"
 IDENTITY_ENV="$DATA_DIR/identity.env"
 
 mkdir -p "$WORKSPACE" "$OPENCLAW_DIR" "$DATA_DIR"
