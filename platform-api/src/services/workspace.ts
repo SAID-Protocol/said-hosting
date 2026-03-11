@@ -495,7 +495,7 @@ export function generateWorkspace(config: WorkspaceConfig): GeneratedWorkspace {
         path: 'memory/lessons.md',
         content: '# Lessons Learned\n\nRecord important lessons, repeated mistakes, and durable guidance here so the agent improves over time.\n',
       },
-      { path: 'workspace/scratchpad.md', content: templateScratchpad(template) },
+      { path: 'scratchpad.md', content: templateScratchpad(template) },
     ],
   };
 }
