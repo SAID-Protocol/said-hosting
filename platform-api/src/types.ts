@@ -49,7 +49,7 @@ export type TierConfig = {
 };
 
 export const TIER_CONFIGS: Record<string, TierConfig> = {
-  starter: { cpu: 'performance-1x', memory: 2048, volumeSize: 1, aiCredits: 5 },
-  pro: { cpu: 'performance-1x', memory: 2048, volumeSize: 5, aiCredits: 15 },
+  starter: { cpu: 'shared-cpu-2x', memory: 2048, volumeSize: 1, aiCredits: 5 },
+  pro: { cpu: 'shared-cpu-2x', memory: 2048, volumeSize: 5, aiCredits: 15 },
   power: { cpu: 'performance-1x', memory: 4096, volumeSize: 10, aiCredits: 50 },
 };

@@ -115,7 +115,7 @@ export async function createVolume(appName: string, volumeName: string, sizeGb: 
     method: 'POST',
     body: JSON.stringify({
       name: volumeName,
-      region: 'ord',
+      region: 'iad',
       size_gb: sizeGb,
     }),
   });
