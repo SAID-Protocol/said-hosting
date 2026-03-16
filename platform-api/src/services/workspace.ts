@@ -25,6 +25,10 @@ export interface WorkspaceConfig {
   customInstructions?: string | null;
   instructions?: string | null;
   tier?: AgentTier | null;
+  // Agent-specific identity fields (filled at creation time)
+  agentId?: string | null;
+  flyAppName?: string | null;
+  createdAt?: string | null;
 }
 
 export interface WorkspaceFile {
@@ -512,6 +516,64 @@ ${customInstructionsSection(config)}
 `;
 }
 
+function identityContent(config: WorkspaceConfig): string {
+  const name = asTrimmedString(config.name) ?? 'SAID Agent';
+  const tier = config.tier ?? 'starter';
+  const flyApp = config.flyAppName ?? 'unknown';
+  const agentId = config.agentId ?? 'unknown';
+  const createdAt = config.createdAt ?? new Date().toISOString();
+
+  return `# MY IDENTITY
+
+## Who I Am
+- **Name:** ${name}
+- **Agent ID:** \`${agentId}\`
+- **Tier:** ${tier}
+- **Platform:** SAID Protocol (https://www.saidprotocol.com)
+- **Program ID:** 5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G
+- **Created:** ${createdAt}
+
+## My Wallet
+Your wallet keypair is stored at \`/agent/data/wallet.json\` (generated on first boot).
+Read it to find your wallet address:
+\`\`\`
+SAID_IDENTITY_WALLET — your Solana public key (set as env var)
+SAID_WALLET_ADDRESS — same wallet, for transactions
+\`\`\`
+Once your wallet is generated, your profile will be at:
+https://www.saidprotocol.com/agents/[YOUR_WALLET_ADDRESS]
+
+## My Endpoints
+- **Fly App:** https://${flyApp}.fly.dev
+- **A2A Messaging:** https://api.saidprotocol.com/api/a2a
+- **Agent Discovery:** https://api.saidprotocol.com/api/a2a/agents
+
+## What I Have
+- **Solana wallet** with USDC funding (amount depends on tier)
+- **On-chain SAID identity** (registered + verified automatically)
+- **A2A messaging** (talk to other SAID agents via WebSocket)
+- **Metaplex Core NFT** (your identity as a portable, on-chain asset)
+- **OpenClaw tools:** web search, file ops, code execution, browser
+- **LLM access** via OpenRouter (credits managed by SAID, included in tier)
+- **x402 micropayments** ($0.01 USDC per agent-to-agent message)
+
+## My Capabilities by Tier
+| Tier | AI Credits | USDC Funding | Storage | RAM |
+|------|-----------|--------------|---------|-----|
+| Starter | $5/mo | $2 USDC | 1 GB | 2 GB |
+| Pro | $15/mo | $5 USDC | 5 GB | 2 GB |
+| Power | $50/mo | $15 USDC | 10 GB | 4 GB |
+
+**Your tier:** ${tier}
+
+## Important
+- This file contains your PARTIAL identity. Wallet address is filled in at boot time.
+- Your wallet keypair is SECRET — never share the private key.
+- Your SAID identity is PUBLIC — anyone can verify you on-chain.
+- This file is regenerated on each deployment. Your wallet persists on the volume.
+`;
+}
+
 function soulContent(config: WorkspaceConfig): string {
   const name = asTrimmedString(config.name) ?? 'SAID Agent';
   return `# SOUL.md — Your Identity
@@ -601,6 +663,7 @@ export function generateWorkspace(config: WorkspaceConfig): GeneratedWorkspace {
       { path: 'RULES.md', content: rulesContent() },
       { path: 'AGENT.md', content: agentContent(config) },
       { path: 'SOUL.md', content: soulContent(config) },
+      { path: 'IDENTITY.md', content: identityContent(config) },
       { path: 'memory/context.md', content: templateContext(template) },
       {
         path: 'memory/lessons.md',

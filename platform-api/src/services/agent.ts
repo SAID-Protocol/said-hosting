@@ -66,6 +66,9 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   if (!payload.name?.trim()) throw new Error('Agent name is required');
 
   const workspaceConfig = buildWorkspaceConfig(payload, tier);
+  workspaceConfig.agentId = agentId;
+  workspaceConfig.flyAppName = appName;
+  workspaceConfig.createdAt = new Date().toISOString();
   const workspace = generateWorkspace(workspaceConfig);
 
   let machineId: string | null = null;

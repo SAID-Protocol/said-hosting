@@ -166,8 +166,59 @@ else
   fi
 fi
 
-# IDENTITY.md generation temporarily disabled due to permission issues
-# Will be re-enabled after fixing ownership handling
+# Update IDENTITY.md with wallet address (filled in at boot, partial was created by wizard)
+if [ -n "$SAID_IDENTITY_WALLET" ] && [ -f "$WORKSPACE/IDENTITY.md" ]; then
+  # Replace placeholder with actual wallet
+  node -e "
+    const fs = require('fs');
+    const path = '$WORKSPACE/IDENTITY.md';
+    let content = fs.readFileSync(path, 'utf8');
+    const wallet = process.env.SAID_IDENTITY_WALLET;
+    // Fill in wallet references
+    content = content.replace(/\\[YOUR_WALLET_ADDRESS\\]/g, wallet);
+    // Append wallet section if not already present
+    if (!content.includes('Wallet Address:')) {
+      content += '\n## Wallet (Auto-filled at boot)\n';
+      content += '- **Wallet Address:** \`' + wallet + '\`\n';
+      content += '- **Profile:** https://www.saidprotocol.com/agents/' + wallet + '\n';
+      content += '- **Status:** Verified ✅\n';
+      content += '- **Last Boot:** ' + new Date().toISOString() + '\n';
+    }
+    fs.writeFileSync(path, content);
+    console.log('[said-hosting] Updated IDENTITY.md with wallet ' + wallet);
+  "
+elif [ -n "$SAID_IDENTITY_WALLET" ] && [ ! -f "$WORKSPACE/IDENTITY.md" ]; then
+  # No wizard-generated IDENTITY.md — create one from scratch
+  node -e "
+    const fs = require('fs');
+    const wallet = process.env.SAID_IDENTITY_WALLET;
+    const name = process.env.SAID_AGENT_NAME || 'SAID Agent';
+    const tier = process.env.SAID_TIER || 'starter';
+    const content = [
+      '# MY IDENTITY',
+      '',
+      '## Who I Am',
+      '- **Name:** ' + name,
+      '- **Wallet Address:** \\\`' + wallet + '\\\`',
+      '- **Tier:** ' + tier,
+      '- **Platform:** SAID Protocol (https://www.saidprotocol.com)',
+      '- **Profile:** https://www.saidprotocol.com/agents/' + wallet,
+      '- **Status:** Verified ✅ (on-chain, Solana mainnet)',
+      '- **Program ID:** 5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G',
+      '',
+      '## What I Have',
+      '- Solana wallet with USDC funding',
+      '- On-chain verified SAID identity',
+      '- A2A messaging (wss://api.saidprotocol.com)',
+      '- OpenClaw tools: web search, file ops, code execution, browser',
+      '- LLM access via OpenRouter',
+      '',
+      '## Last Boot: ' + new Date().toISOString(),
+    ].join('\\n');
+    fs.writeFileSync('$WORKSPACE/IDENTITY.md', content);
+    console.log('[said-hosting] Created IDENTITY.md for ' + name + ' (' + wallet + ')');
+  "
+fi
 
 cd "$WORKSPACE"
 
