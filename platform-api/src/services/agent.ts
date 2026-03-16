@@ -87,6 +87,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
       config: payload.config ? JSON.stringify(payload.config) : undefined,
       workspaceFiles: JSON.stringify(workspace.files),
       openRouterKey: orKey.key,
+      telegramToken: payload.telegram_token,
       gatewayToken,
     });
     machineId = machine.id;

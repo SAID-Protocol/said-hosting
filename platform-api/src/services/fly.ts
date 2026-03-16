@@ -1,7 +1,7 @@
 import { TIER_CONFIGS } from '../types';
 
 const FLY_API_BASE = 'https://api.machines.dev/v1';
-const AGENT_IMAGE = 'registry.fly.io/said-agent-test:deployment-MMLIZBIZ';
+const AGENT_IMAGE = 'registry.fly.io/said-343ea976:deployment-01KKT5838CACVP9B5JA7JA7MJW';
 
 type TierKey = 'starter' | 'pro' | 'power';
 
@@ -131,6 +131,7 @@ export async function createMachine(params: {
   programMd?: string;
   config?: string;
   openRouterKey?: string;
+  telegramToken?: string; // User's Telegram bot token from @BotFather
   gatewayToken: string; // Required: plaintext token for container env
   workspaceFiles?: string; // JSON array of {path, content} written at boot
 }): Promise<FlyMachineResponse> {
@@ -150,6 +151,7 @@ export async function createMachine(params: {
           SAID_PLATFORM_API_KEY: process.env.API_KEY ?? '',
           OPENCLAW_GATEWAY_TOKEN: gatewayToken,
           OPENROUTER_API_KEY: params.openRouterKey ?? '',
+          SAID_TELEGRAM_TOKEN: params.telegramToken ?? '',
           PROGRAM_MD: params.programMd ?? '',
           AGENT_CONFIG_JSON: params.config ?? '{}',
           WORKSPACE_FILES_JSON: params.workspaceFiles ?? '[]',

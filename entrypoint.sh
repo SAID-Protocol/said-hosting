@@ -15,10 +15,10 @@ else
 fi
 
 WORKSPACE="$DATA_DIR/workspace"
-OPENCLAW_DIR="/home/agent/.openclaw"
+OPENCLAW_DIR="$DATA_DIR"
 IDENTITY_ENV="$DATA_DIR/identity.env"
 
-mkdir -p "$WORKSPACE" "$OPENCLAW_DIR" "$DATA_DIR"
+mkdir -p "$WORKSPACE" "$OPENCLAW_DIR" "$DATA_DIR" "/home/agent/.openclaw"
 
 # Initialize workspace on first run
 if [ ! -d "$WORKSPACE" ] || [ -z "$(ls -A "$WORKSPACE" 2>/dev/null)" ]; then
@@ -47,23 +47,40 @@ else
   echo "[said-hosting] Warning: identity env file missing at $IDENTITY_ENV"
 fi
 
+# Always write fresh config (gateway restarts need clean state)
 # Use OpenRouter as LLM provider (per-agent key with spending limits)
 # Falls back to direct Anthropic if no OpenRouter key provided
 if [ -n "$OPENROUTER_API_KEY" ]; then
   echo "[said-hosting] Using OpenRouter for LLM access (per-agent key)"
   node -e "
+    const tgToken = process.env.SAID_TELEGRAM_TOKEN;
+    const gwToken = process.env.GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN;
     const config = {
       meta: {
-        lastTouchedVersion: '2026.2.9',
+        lastTouchedVersion: '2026.3.8',
         lastTouchedAt: new Date().toISOString()
       },
       gateway: {
-        port: 18789,
-        bind: 'lan',
-        mode: 'local',
-        auth: { mode: 'token', token: process.env.OPENCLAW_GATEWAY_TOKEN || '$GATEWAY_TOKEN' },
-        http: { endpoints: { chatCompletions: { enabled: true } } }
+        controlUi: {
+          dangerouslyAllowHostHeaderOriginFallback: true
+        },
+        http: {
+          endpoints: {
+            chatCompletions: { enabled: true }
+          }
+        },
+        auth: gwToken ? { mode: 'token', token: gwToken } : undefined
       },
+      channels: tgToken ? {
+        telegram: {
+          enabled: true,
+          botToken: tgToken,
+          dmPolicy: 'open',
+          allowFrom: ['*'],
+          groupPolicy: 'open',
+          groupAllowFrom: ['*']
+        }
+      } : {},
       auth: {
         profiles: {
           'openrouter:default': {
@@ -72,24 +89,29 @@ if [ -n "$OPENROUTER_API_KEY" ]; then
           }
         }
       },
-      agents: { defaults: { model: { primary: 'openrouter/anthropic/claude-sonnet-4-5' } } },
+      agents: { defaults: { model: { primary: 'openrouter/anthropic/claude-sonnet-4-5' }, maxConcurrent: 2 } },
       env: {
         OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
         SAID_IDENTITY_WALLET: process.env.SAID_IDENTITY_WALLET,
         SAID_WALLET_ADDRESS: process.env.SAID_WALLET_ADDRESS
       }
     };
+    // Clean undefined values
+    if (!config.gateway.auth) delete config.gateway.auth;
     require('fs').writeFileSync('$OPENCLAW_DIR/openclaw.json', JSON.stringify(config, null, 2));
   "
 else
   echo "[said-hosting] Using direct Anthropic API key"
   node -e "
     const config = {
+      meta: {
+        lastTouchedVersion: '2026.3.8',
+        lastTouchedAt: new Date().toISOString()
+      },
       gateway: {
-        port: 18789,
-        bind: 'lan',
-        mode: 'local',
-        auth: { mode: 'token', token: '$GATEWAY_TOKEN' }
+        controlUi: {
+          dangerouslyAllowHostHeaderOriginFallback: true
+        }
       },
       agents: { defaults: { model: { primary: 'anthropic/claude-sonnet-4-5' } } },
       env: {
@@ -144,88 +166,22 @@ else
   fi
 fi
 
+# IDENTITY.md generation temporarily disabled due to permission issues
+# Will be re-enabled after fixing ownership handling
+
 cd "$WORKSPACE"
 
 echo "[said-hosting] Starting OpenClaw gateway..."
 echo "[said-hosting] Agent: $AGENT_NAME | Tier: ${SAID_TIER:-starter} | Wallet: ${SAID_IDENTITY_WALLET:-unknown}"
 
-openclaw gateway --port 18789 &
-GATEWAY_PID=$!
+export OPENCLAW_STATE_DIR="$DATA_DIR"
+export HOME="/home/agent"
 
-echo "[said-hosting] Waiting for gateway to initialize..."
-for i in $(seq 1 30); do
-  if curl -sf http://127.0.0.1:18789/ > /dev/null 2>&1; then
-    echo "[said-hosting] Gateway is up after ${i}s"
-    break
-  fi
-  sleep 1
-done
+# Clean up old configs
+rm -f /home/agent/.openclaw/openclaw.json 2>/dev/null
+export OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN"
+export OPENCLAW_GATEWAY_PORT=18789
+export NODE_OPTIONS="--max-old-space-size=3072"
 
-PATCH_JSON='{}'
-if [ -n "$OPENROUTER_API_KEY" ]; then
-  echo "[said-hosting] Patching config: enabling chatCompletions + OpenRouter model"
-  PATCH_JSON=$(node -e "
-    console.log(JSON.stringify({
-      gateway: { http: { endpoints: { chatCompletions: { enabled: true } } } },
-      agents: { defaults: { model: { primary: 'openrouter/anthropic/claude-sonnet-4-5' } } },
-      env: {
-        OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
-        SAID_IDENTITY_WALLET: process.env.SAID_IDENTITY_WALLET,
-        SAID_WALLET_ADDRESS: process.env.SAID_WALLET_ADDRESS
-      }
-    }));
-  ")
-else
-  echo "[said-hosting] Patching config: enabling chatCompletions"
-  PATCH_JSON=$(node -e "
-    console.log(JSON.stringify({
-      gateway: { http: { endpoints: { chatCompletions: { enabled: true } } } },
-      env: {
-        SAID_IDENTITY_WALLET: process.env.SAID_IDENTITY_WALLET,
-        SAID_WALLET_ADDRESS: process.env.SAID_WALLET_ADDRESS
-      }
-    }));
-  ")
-fi
-
-curl -sf -X PATCH "http://127.0.0.1:18789/__openclaw__/api/config" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $GATEWAY_TOKEN" \
-  -d "$PATCH_JSON" > /dev/null 2>&1 && echo "[said-hosting] Config patched successfully" || echo "[said-hosting] Config patch failed (will retry via file)"
-
-if ! curl -sf http://127.0.0.1:18789/v1/chat/completions -H "Authorization: Bearer $GATEWAY_TOKEN" -d '{}' 2>&1 | grep -q "model"; then
-  echo "[said-hosting] Patching config file directly..."
-  node -e "
-    const fs = require('fs');
-    const cfg = JSON.parse(fs.readFileSync('$OPENCLAW_DIR/openclaw.json', 'utf8'));
-    if (!cfg.gateway) cfg.gateway = {};
-    if (!cfg.gateway.http) cfg.gateway.http = {};
-    if (!cfg.gateway.http.endpoints) cfg.gateway.http.endpoints = {};
-    cfg.gateway.http.endpoints.chatCompletions = { enabled: true };
-    if (process.env.OPENCLAW_GATEWAY_TOKEN) {
-      cfg.gateway.auth = cfg.gateway.auth || {};
-      cfg.gateway.auth.mode = 'token';
-      cfg.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
-    }
-    cfg.env = cfg.env || {};
-    if (process.env.SAID_IDENTITY_WALLET) cfg.env.SAID_IDENTITY_WALLET = process.env.SAID_IDENTITY_WALLET;
-    if (process.env.SAID_WALLET_ADDRESS) cfg.env.SAID_WALLET_ADDRESS = process.env.SAID_WALLET_ADDRESS;
-    if (process.env.OPENROUTER_API_KEY) {
-      cfg.agents = cfg.agents || {};
-      cfg.agents.defaults = cfg.agents.defaults || {};
-      cfg.agents.defaults.model = cfg.agents.defaults.model || {};
-      cfg.agents.defaults.model.primary = 'openrouter/anthropic/claude-sonnet-4-5';
-      cfg.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-      cfg.auth = cfg.auth || {};
-      cfg.auth.profiles = cfg.auth.profiles || {};
-      cfg.auth.profiles['openrouter:default'] = { provider: 'openrouter', mode: 'api_key' };
-    }
-    fs.writeFileSync('$OPENCLAW_DIR/openclaw.json', JSON.stringify(cfg, null, 2));
-    console.log('[said-hosting] Config file patched');
-  "
-  kill $GATEWAY_PID 2>/dev/null
-  sleep 2
-  exec openclaw gateway --port 18789
-fi
-
-wait $GATEWAY_PID
+# Telegram extension deps pre-installed in Dockerfile — clean startup
+exec node /usr/local/lib/node_modules/openclaw/dist/index.js gateway --port 18789 --bind lan --allow-unconfigured

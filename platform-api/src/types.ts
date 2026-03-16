@@ -38,6 +38,7 @@ export interface CreateAgentRequest {
   tier?: 'starter' | 'pro' | 'power';
   program_md?: string;
   config?: Record<string, unknown>;
+  telegram_token?: string;
 }
 
 export type TierConfig = {
@@ -48,7 +49,7 @@ export type TierConfig = {
 };
 
 export const TIER_CONFIGS: Record<string, TierConfig> = {
-  starter: { cpu: 'shared-cpu-1x', memory: 512, volumeSize: 1, aiCredits: 5 },
-  pro: { cpu: 'shared-cpu-1x', memory: 512, volumeSize: 5, aiCredits: 15 }, // Reduced from 1024 to avoid region capacity issues
-  power: { cpu: 'shared-cpu-1x', memory: 1024, volumeSize: 10, aiCredits: 50 }, // Reduced from 2048
+  starter: { cpu: 'performance-1x', memory: 2048, volumeSize: 1, aiCredits: 5 },
+  pro: { cpu: 'performance-1x', memory: 2048, volumeSize: 5, aiCredits: 15 },
+  power: { cpu: 'performance-1x', memory: 4096, volumeSize: 10, aiCredits: 50 },
 };

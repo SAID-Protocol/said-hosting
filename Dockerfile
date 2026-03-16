@@ -9,7 +9,10 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw + Solana bootstrap dependencies globally
-RUN npm install -g openclaw@latest @solana/web3.js @solana/spl-token tweetnacl bs58
+RUN npm install -g openclaw@2026.3.12 @solana/web3.js @solana/spl-token tweetnacl bs58
+
+# Pre-install Telegram extension dependencies (avoids first-load hang in container)
+RUN cd /usr/local/lib/node_modules/openclaw/extensions/telegram && npm install 2>/dev/null || true
 
 # Create agent directories (workspace will be on mounted volume)
 RUN mkdir -p /agent/scripts /data
@@ -37,7 +40,7 @@ VOLUME ["/agent/data"]
 EXPOSE 18789
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=5 \
   CMD curl -f http://localhost:18789/health || exit 1
 
 # Run as non-root
