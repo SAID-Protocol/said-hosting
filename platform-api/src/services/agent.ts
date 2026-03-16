@@ -6,6 +6,7 @@ import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
 import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 import { generateWorkspace, WorkspaceConfig } from './workspace';
 import { confirmHostedAgent, fundAgentWallet, getFundingAmountUsdc, registerHostedAgent } from './said';
+import { registerAgentMetaplex } from './metaplex';
 
 function generateId(): string { return crypto.randomUUID(); }
 function shortId(id: string): string { return id.replace(/-/g, '').slice(0, 8); }
@@ -222,11 +223,48 @@ export async function confirmAgentSaid(agentId: string, signedTransaction: strin
     logActivity(agentId, 'error', `USDC funding failed: ${funding.error}`);
   }
 
+  // Metaplex Agent Registry — create NFT + register identity (non-blocking)
+  let metaplex: { assetAddress?: string; registrationUri?: string } = {};
+  if (walletAddress && process.env.PLATFORM_WALLET_KEYPAIR) {
+    try {
+      const metaplexResult = await registerAgentMetaplex({
+        name: agent.name,
+        description: `Hosted SAID agent: ${agent.name}`,
+        walletAddress,
+        capabilities: ['messaging', 'web-search'],
+        tier: agent.tier,
+        flyAppName: agent.flyAppName ?? undefined,
+      });
+
+      if (metaplexResult.success) {
+        metaplex = {
+          assetAddress: metaplexResult.assetAddress,
+          registrationUri: metaplexResult.registrationUri,
+        };
+        await prisma.agent.update({
+          where: { id: agentId },
+          data: {
+            metaplexAsset: metaplexResult.assetAddress,
+            metaplexUri: metaplexResult.registrationUri,
+          },
+        });
+        logActivity(agentId, 'system', `Metaplex NFT minted: ${metaplexResult.assetAddress}`);
+      } else {
+        console.error(`[agents] Metaplex registration failed for ${agentId}: ${metaplexResult.error}`);
+        logActivity(agentId, 'warning', `Metaplex NFT mint failed: ${metaplexResult.error}`);
+      }
+    } catch (error) {
+      console.error(`[agents] Metaplex error for ${agentId}:`, error);
+      logActivity(agentId, 'warning', `Metaplex error: ${error instanceof Error ? error.message : 'Unknown'}`);
+    }
+  }
+
   return {
     agent: fundedAgent,
     saidPda,
     signature: confirmation.signature,
     funding,
+    metaplex,
   };
 }
 
