@@ -217,9 +217,9 @@ agentRouter.post('/:id/chat', async (req, res) => {
       return;
     }
 
-    // Add timeout to fetch (60 seconds for long-running agent responses)
+    // Add timeout to fetch (180 seconds — first message reads workspace files and can be slow)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 180000);
 
     try {
       // Route to Hetzner container or legacy Fly app
