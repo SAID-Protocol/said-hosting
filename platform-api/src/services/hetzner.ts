@@ -34,20 +34,43 @@ type ContainerInfo = {
 
 /**
  * Execute a command on the Hetzner server via SSH
+ * Uses stdin piping to avoid shell escaping issues with complex commands
  */
 async function sshExec(command: string): Promise<string> {
-  const sshCmd = `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ${HETZNER_SSH_KEY} ${HETZNER_USER}@${HETZNER_HOST} ${JSON.stringify(command)}`;
-  
-  try {
-    const { stdout, stderr } = await execAsync(sshCmd, { timeout: 60000 });
-    if (stderr && !stderr.includes('Warning:')) {
-      console.warn('[hetzner] stderr:', stderr.trim());
-    }
-    return stdout.trim();
-  } catch (error: unknown) {
-    const execError = error as { stderr?: string; message?: string };
-    throw new Error(`SSH command failed: ${execError.stderr || execError.message}`);
-  }
+  const { spawn } = await import('child_process');
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ssh', [
+      '-o', 'StrictHostKeyChecking=no',
+      '-o', 'ConnectTimeout=10',
+      '-i', HETZNER_SSH_KEY,
+      `${HETZNER_USER}@${HETZNER_HOST}`,
+      'bash', '-s',
+    ], { timeout: 60000 });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+    proc.on('close', (code: number | null) => {
+      if (code !== 0) {
+        reject(new Error(`SSH command failed (exit ${code}): ${stderr.trim()}`));
+      } else {
+        if (stderr && !stderr.includes('Warning:')) {
+          console.warn('[hetzner] stderr:', stderr.trim());
+        }
+        resolve(stdout.trim());
+      }
+    });
+
+    proc.on('error', (err: Error) => reject(new Error(`SSH spawn failed: ${err.message}`)));
+
+    // Pipe command via stdin to avoid escaping issues
+    proc.stdin.write(command);
+    proc.stdin.end();
+  });
 }
 
 /**
