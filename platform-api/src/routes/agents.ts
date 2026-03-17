@@ -222,7 +222,14 @@ agentRouter.post('/:id/chat', async (req, res) => {
     const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     try {
-      const response = await fetch(`https://${agent.flyAppName}.fly.dev/v1/chat/completions`, {
+      // Route to Hetzner container or legacy Fly app
+      const isHetzner = agent.flyAppName?.startsWith('hetzner:');
+      const port = isHetzner ? agent.flyAppName.split(':')[1] : null;
+      const chatUrl = isHetzner 
+        ? `http://${process.env.HETZNER_HOST || '87.99.140.184'}:${port}/v1/chat/completions`
+        : `https://${agent.flyAppName}.fly.dev/v1/chat/completions`;
+
+      const response = await fetch(chatUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

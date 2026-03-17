@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../db';
 import { CreateAgentRequest, TIER_CONFIGS } from '../types';
-import { createApp, createMachine, createVolume, deleteApp, deleteMachine, getMachine, startMachine, stopMachine } from './fly';
+import { createContainer, deleteContainer, getContainer, startContainer, stopContainer } from './hetzner';
 import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
 import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 import { generateWorkspace, WorkspaceConfig } from './workspace';
@@ -56,9 +56,6 @@ function buildWorkspaceConfig(payload: CreateAgentRequest, tier: 'free' | 'start
 export async function createAgent(userId: string, payload: CreateAgentRequest) {
   console.log('[createAgent] telegram_token present:', !!payload.telegram_token, 'tier:', payload.tier);
   const agentId = generateId();
-  const sid = shortId(agentId);
-  const appName = `said-${sid}`;
-  const volumeName = `data_${sid}`;
   const tier = payload.tier ?? 'starter';
   const tierConfig = TIER_CONFIGS[tier];
   const gatewayToken = generateGatewayToken();
@@ -68,24 +65,19 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
 
   const workspaceConfig = buildWorkspaceConfig(payload, tier);
   workspaceConfig.agentId = agentId;
-  workspaceConfig.flyAppName = appName;
+  workspaceConfig.flyAppName = `hetzner-${agentId.slice(0, 8)}`;
   workspaceConfig.createdAt = new Date().toISOString();
   const workspace = generateWorkspace(workspaceConfig);
 
-  let machineId: string | null = null;
+  let containerId: string | null = null;
   let orKeyHash: string | null = null;
   try {
     const orKey = await createAgentKey(agentId, payload.name.trim(), tier);
     orKeyHash = orKey.hash;
 
-    await createApp(appName);
-    const volume = await createVolume(appName, volumeName, tierConfig.volumeSize);
-
-    const machine = await createMachine({
-      appName,
+    const container = await createContainer({
       agentId,
       tier,
-      volumeId: volume.id,
       agentName: payload.name.trim(),
       agentDescription: payload.description || `Hosted SAID agent: ${payload.name.trim()}`,
       programMd: payload.program_md,
@@ -95,14 +87,14 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
       telegramToken: payload.telegram_token,
       gatewayToken,
     });
-    machineId = machine.id;
+    containerId = container.id;
 
     const agent = await prisma.agent.create({
       data: {
         id: agentId,
         name: payload.name.trim(),
-        flyMachineId: machine.id,
-        flyAppName: appName,
+        flyMachineId: container.id,       // reuse field for container ID
+        flyAppName: `hetzner:${container.port}`,  // store host:port for routing
         status: 'running',
         tier,
         programMd: payload.program_md ?? null,
@@ -120,14 +112,13 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         },
       },
     });
-    logActivity(agentId, 'system', `Agent created on Fly app ${appName} with OpenRouter key (limit: $${orKey.limit}/mo)`);
+    logActivity(agentId, 'system', `Agent created on Hetzner (port ${container.port}) with OpenRouter key (limit: $${orKey.limit}/mo)`);
     
     // Return agent with plaintext gateway token (only time it's exposed)
     return { ...agent, gatewayToken };
   } catch (error) {
     if (orKeyHash) { try { await deleteKey(orKeyHash); } catch {} }
-    if (machineId) { try { await deleteMachine(appName, machineId); } catch {} }
-    try { await deleteApp(appName); } catch {}
+    if (containerId) { try { await deleteContainer(agentId); } catch {} }
     throw error;
   }
 }
@@ -300,8 +291,8 @@ export async function updateAgent(userId: string, agentId: string, updates: { pr
 
 export async function startAgent(userId: string, agentId: string) {
   const agent = await getAgentById(userId, agentId);
-  if (!agent?.flyAppName || !agent?.flyMachineId) throw new Error('Agent not found');
-  await startMachine(agent.flyAppName, agent.flyMachineId);
+  if (!agent) throw new Error('Agent not found');
+  await startContainer(agentId);
   if (agent.openrouterKeyHash) { try { await enableKey(agent.openrouterKeyHash); } catch {} }
   const updated = await prisma.agent.update({ where: { id: agentId }, data: { status: 'running' } });
   logActivity(agentId, 'system', 'Agent started');
@@ -310,8 +301,8 @@ export async function startAgent(userId: string, agentId: string) {
 
 export async function stopAgent(userId: string, agentId: string) {
   const agent = await getAgentById(userId, agentId);
-  if (!agent?.flyAppName || !agent?.flyMachineId) throw new Error('Agent not found');
-  await stopMachine(agent.flyAppName, agent.flyMachineId);
+  if (!agent) throw new Error('Agent not found');
+  await stopContainer(agentId);
   if (agent.openrouterKeyHash) { try { await disableKey(agent.openrouterKeyHash); } catch {} }
   const updated = await prisma.agent.update({ where: { id: agentId }, data: { status: 'stopped' } });
   logActivity(agentId, 'system', 'Agent stopped');
@@ -320,19 +311,18 @@ export async function stopAgent(userId: string, agentId: string) {
 
 export async function deleteAgent(userId: string, agentId: string) {
   const agent = await getAgentById(userId, agentId);
-  if (!agent?.flyAppName || !agent?.flyMachineId) throw new Error('Agent not found');
+  if (!agent) throw new Error('Agent not found');
   if (agent.openrouterKeyHash) { try { await deleteKey(agent.openrouterKeyHash); } catch {} }
-  await deleteMachine(agent.flyAppName, agent.flyMachineId);
-  await deleteApp(agent.flyAppName);
+  await deleteContainer(agentId);
   await prisma.activity.deleteMany({ where: { agentId } });
   await prisma.agent.delete({ where: { id: agentId } });
 }
 
 export async function getAgentStatus(userId: string, agentId: string) {
   const agent = await getAgentById(userId, agentId);
-  if (!agent?.flyAppName || !agent?.flyMachineId) throw new Error('Agent not found');
-  const fly = await getMachine(agent.flyAppName, agent.flyMachineId);
-  return { agent, fly };
+  if (!agent) throw new Error('Agent not found');
+  const container = await getContainer(agentId);
+  return { agent, container };
 }
 
 export async function getAgentLogs(userId: string, agentId: string) {
