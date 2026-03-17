@@ -14,7 +14,7 @@ else
   DATA_DIR="/data"
 fi
 
-WORKSPACE="$DATA_DIR/workspace"
+WORKSPACE="/home/agent/.openclaw/workspace"
 OPENCLAW_DIR="$DATA_DIR"
 IDENTITY_ENV="$DATA_DIR/identity.env"
 
@@ -58,7 +58,7 @@ if [ -n "$OPENROUTER_API_KEY" ]; then
     const tier = process.env.SAID_AGENT_TIER || 'free';
     const model = (tier === 'pro' || tier === 'power') 
       ? 'openrouter/anthropic/claude-sonnet-4-5' 
-      : 'openrouter/openai/gpt-4o-mini';
+      : 'openrouter/anthropic/claude-sonnet-4-5';
     const config = {
       meta: {
         lastTouchedVersion: '2026.3.8',
@@ -178,19 +178,27 @@ if [ -n "$SAID_IDENTITY_WALLET" ] && [ -f "$WORKSPACE/IDENTITY.md" ]; then
     const path = '$WORKSPACE/IDENTITY.md';
     let content = fs.readFileSync(path, 'utf8');
     const wallet = process.env.SAID_IDENTITY_WALLET;
-    // Fill in wallet references
+    // Fill in all wallet placeholders
     content = content.replace(/\\[YOUR_WALLET_ADDRESS\\]/g, wallet);
-    // Append wallet section if not already present
-    if (!content.includes('Wallet Address:')) {
-      content += '\n## Wallet (Auto-filled at boot)\n';
-      content += '- **Wallet Address:** \`' + wallet + '\`\n';
-      content += '- **Profile:** https://www.saidprotocol.com/agents/' + wallet + '\n';
-      content += '- **Status:** Verified ✅\n';
-      content += '- **Last Boot:** ' + new Date().toISOString() + '\n';
-    }
+    content = content.replace(/\\(wallet-address\\)/g, wallet);
+    content = content.replace(/\\(filled in at boot.*?\\)/g, wallet);
+    content = content.replace(/\\(filled at boot\\)/g, wallet);
     fs.writeFileSync(path, content);
     console.log('[said-hosting] Updated IDENTITY.md with wallet ' + wallet);
   "
+  # Also update AGENTS.md with wallet
+  if [ -f "$WORKSPACE/AGENTS.md" ]; then
+    node -e "
+      const fs = require('fs');
+      const p = '$WORKSPACE/AGENTS.md';
+      let c = fs.readFileSync(p, 'utf8');
+      const w = process.env.SAID_IDENTITY_WALLET;
+      c = c.replace(/\\(filled at boot\\)/g, w);
+      c = c.replace(/\\(wallet-address\\)/g, w);
+      fs.writeFileSync(p, c);
+      console.log('[said-hosting] Updated AGENTS.md with wallet ' + w);
+    "
+  fi
 elif [ -n "$SAID_IDENTITY_WALLET" ] && [ ! -f "$WORKSPACE/IDENTITY.md" ]; then
   # No wizard-generated IDENTITY.md — create one from scratch
   node -e "
@@ -224,6 +232,18 @@ elif [ -n "$SAID_IDENTITY_WALLET" ] && [ ! -f "$WORKSPACE/IDENTITY.md" ]; then
   "
 fi
 
+# Clean up default OpenClaw workspace files that conflict with wizard-generated ones
+rm -f "$WORKSPACE/BOOTSTRAP.md" 2>/dev/null
+rm -f "$WORKSPACE/USER.md" 2>/dev/null
+rm -f "$WORKSPACE/HEARTBEAT.md" 2>/dev/null
+rm -f "$WORKSPACE/TOOLS.md" 2>/dev/null
+
+# Ensure memory directory exists
+mkdir -p "$WORKSPACE/memory"
+
+# Fix ownership so agent can write to workspace (memory, scratchpad, etc.)
+chown -R agent:agent "$WORKSPACE" 2>/dev/null || true
+
 cd "$WORKSPACE"
 
 echo "[said-hosting] Starting OpenClaw gateway..."
@@ -232,8 +252,9 @@ echo "[said-hosting] Agent: $AGENT_NAME | Tier: ${SAID_TIER:-starter} | Wallet: 
 export OPENCLAW_STATE_DIR="$DATA_DIR"
 export HOME="/home/agent"
 
-# Clean up old configs
+# Symlink config so OpenClaw finds it at ~/.openclaw/openclaw.json
 rm -f /home/agent/.openclaw/openclaw.json 2>/dev/null
+ln -sf "$DATA_DIR/openclaw.json" /home/agent/.openclaw/openclaw.json
 export OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN"
 export OPENCLAW_GATEWAY_PORT=18789
 export NODE_OPTIONS="--max-old-space-size=3072"
