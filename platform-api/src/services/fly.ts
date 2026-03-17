@@ -3,7 +3,7 @@ import { TIER_CONFIGS } from '../types';
 const FLY_API_BASE = 'https://api.machines.dev/v1';
 const AGENT_IMAGE = 'registry.fly.io/said-343ea976:deployment-01KKT5838CACVP9B5JA7JA7MJW';
 
-type TierKey = 'starter' | 'pro' | 'power';
+type TierKey = 'free' | 'starter' | 'pro' | 'power';
 
 type FlyMachineResponse = {
   id: string;
