@@ -55,6 +55,10 @@ if [ -n "$OPENROUTER_API_KEY" ]; then
   node -e "
     const tgToken = process.env.SAID_TELEGRAM_TOKEN;
     const gwToken = process.env.GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN;
+    const tier = process.env.SAID_AGENT_TIER || 'free';
+    const model = (tier === 'pro' || tier === 'power') 
+      ? 'openrouter/anthropic/claude-sonnet-4-5' 
+      : 'openrouter/openai/gpt-4o-mini';
     const config = {
       meta: {
         lastTouchedVersion: '2026.3.8',
@@ -89,7 +93,7 @@ if [ -n "$OPENROUTER_API_KEY" ]; then
           }
         }
       },
-      agents: { defaults: { model: { primary: 'openrouter/anthropic/claude-sonnet-4-5' }, maxConcurrent: 2 } },
+      agents: { defaults: { model: { primary: model }, maxConcurrent: 2 } },
       env: {
         OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
         SAID_IDENTITY_WALLET: process.env.SAID_IDENTITY_WALLET,

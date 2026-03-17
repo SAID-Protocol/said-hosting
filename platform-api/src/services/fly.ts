@@ -144,6 +144,7 @@ export async function createMachine(params: {
       config: {
         image: AGENT_IMAGE,
         env: {
+          SAID_AGENT_TIER: params.tier,
           SAID_AGENT_ID: params.agentId,
           SAID_AGENT_NAME: params.agentName ?? 'SAID Agent',
           SAID_AGENT_DESCRIPTION: params.agentDescription ?? '',
