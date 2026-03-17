@@ -54,6 +54,7 @@ function buildWorkspaceConfig(payload: CreateAgentRequest, tier: 'free' | 'start
 }
 
 export async function createAgent(userId: string, payload: CreateAgentRequest) {
+  console.log('[createAgent] telegram_token present:', !!payload.telegram_token, 'tier:', payload.tier);
   const agentId = generateId();
   const sid = shortId(agentId);
   const appName = `said-${sid}`;
