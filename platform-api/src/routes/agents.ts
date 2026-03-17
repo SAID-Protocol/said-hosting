@@ -238,7 +238,7 @@ agentRouter.post('/:id/chat', async (req, res) => {
         body: JSON.stringify({
           model: (agent.tier === 'pro' || agent.tier === 'power') 
             ? 'openrouter/anthropic/claude-sonnet-4-5' 
-            : 'openrouter/openai/gpt-4o-mini',
+            : 'openrouter/anthropic/claude-sonnet-4-5',
           messages: messages,
         }),
         signal: controller.signal,

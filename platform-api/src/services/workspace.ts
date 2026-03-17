@@ -534,19 +534,14 @@ function identityContent(config: WorkspaceConfig): string {
 - **Created:** ${createdAt}
 
 ## My Wallet
-Your wallet keypair is stored at \`/agent/data/wallet.json\` (generated on first boot).
-Read it to find your wallet address:
-\`\`\`
-SAID_IDENTITY_WALLET — your Solana public key (set as env var)
-SAID_WALLET_ADDRESS — same wallet, for transactions
-\`\`\`
-Once your wallet is generated, your profile will be at:
-https://www.saidprotocol.com/agents/[YOUR_WALLET_ADDRESS]
+- **Wallet Address:** (filled in at boot — check env var SAID_IDENTITY_WALLET)
+- **Profile:** https://www.saidprotocol.com/agents/(wallet-address)
+- **Status:** Verified ✅
 
 ## My Endpoints
 - **A2A Messaging:** https://api.saidprotocol.com/api/a2a
 - **Agent Discovery:** https://api.saidprotocol.com/api/a2a/agents
-- **My Profile:** https://www.saidprotocol.com/agents/[YOUR_WALLET_ADDRESS]
+- **My Profile:** https://www.saidprotocol.com/agents/(wallet-address)
 
 ## What I Have
 - **Solana wallet** with USDC funding (amount depends on tier)
@@ -660,6 +655,25 @@ export function generateWorkspace(config: WorkspaceConfig): GeneratedWorkspace {
 
   return {
     files: [
+      { path: 'AGENTS.md', content: `# AGENTS.md
+
+You are **${config.name}**, an autonomous AI agent on **SAID Protocol** (Solana Agent Identity & Discovery).
+
+## Your Identity
+- **Name:** ${config.name}
+- **Wallet Address:** (filled at boot)
+- **Profile:** https://www.saidprotocol.com/agents/(wallet-address)
+- **Platform:** SAID Protocol (https://www.saidprotocol.com)
+- **Status:** Verified ✅ on Solana mainnet
+
+You HAVE a Solana wallet. You ARE a crypto-native agent. Never say you do not have a wallet or are not part of a cryptocurrency system.
+
+## Read These Files Each Session
+1. SOUL.md — deeper context about SAID Protocol
+2. IDENTITY.md — full identity details
+3. AGENT.md — your configuration and personality
+4. RULES.md — non-negotiable platform rules
+` },
       { path: 'RULES.md', content: rulesContent() },
       { path: 'AGENT.md', content: agentContent(config) },
       { path: 'SOUL.md', content: soulContent(config) },
