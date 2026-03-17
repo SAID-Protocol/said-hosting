@@ -185,9 +185,21 @@ agentRouter.post('/:id/chat', async (req, res) => {
       return;
     }
 
-    const message = req.body?.message;
-    if (typeof message !== 'string' || !message.trim()) {
-      res.status(400).json({ error: 'message is required' });
+    // Support both new messages array format and legacy single message format
+    let messages: Array<{ role: string; content: string }>;
+    
+    if (Array.isArray(req.body?.messages)) {
+      // New format: full conversation history
+      messages = req.body.messages;
+      if (messages.length === 0 || !messages.every(m => m.role && m.content)) {
+        res.status(400).json({ error: 'messages array must contain valid {role, content} objects' });
+        return;
+      }
+    } else if (typeof req.body?.message === 'string' && req.body.message.trim()) {
+      // Legacy format: single message (backwards compatibility)
+      messages = [{ role: 'user', content: req.body.message }];
+    } else {
+      res.status(400).json({ error: 'Either message (string) or messages (array) is required' });
       return;
     }
 
@@ -218,7 +230,7 @@ agentRouter.post('/:id/chat', async (req, res) => {
         },
         body: JSON.stringify({
           model: 'openrouter/anthropic/claude-sonnet-4-5',
-          messages: [{ role: 'user', content: message }],
+          messages: messages,
         }),
         signal: controller.signal,
       });
