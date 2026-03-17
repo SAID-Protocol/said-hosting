@@ -50,6 +50,7 @@ export interface OpenRouterKeyInfo {
 
 // Tier → OpenRouter credit limit (USD)
 const TIER_CREDIT_LIMITS: Record<string, number> = {
+  free: 1,
   starter: 5,
   pro: 15,
   power: 50,

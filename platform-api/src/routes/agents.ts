@@ -229,7 +229,9 @@ agentRouter.post('/:id/chat', async (req, res) => {
           'Authorization': `Bearer ${providedToken}`,
         },
         body: JSON.stringify({
-          model: 'openrouter/anthropic/claude-sonnet-4-5',
+          model: (agent.tier === 'pro' || agent.tier === 'power') 
+            ? 'openrouter/anthropic/claude-sonnet-4-5' 
+            : 'openrouter/openai/gpt-4o-mini',
           messages: messages,
         }),
         signal: controller.signal,
