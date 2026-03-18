@@ -131,7 +131,7 @@ export async function createContainer(params: {
   // to avoid shell escaping issues
   const dataDir = `/opt/said-hosting/agents/${params.agentId}`;
   
-  await sshExec(`mkdir -p ${dataDir}`);
+  await sshExec(`mkdir -p ${dataDir} && chown -R 1000:1000 ${dataDir}`);
   
   // Write program_md to file if present
   if (params.programMd) {
@@ -150,6 +150,9 @@ export async function createContainer(params: {
     const b64 = Buffer.from(params.config).toString('base64');
     await sshExec(`echo '${b64}' | base64 -d > ${dataDir}/.agent_config`);
   }
+
+  // Ensure agent user (1000) owns all data files
+  await sshExec(`chown -R 1000:1000 ${dataDir}`);
 
   const dockerCmd = `docker run -d \
     --name ${containerName} \
