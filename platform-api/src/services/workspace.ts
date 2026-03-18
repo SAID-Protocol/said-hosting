@@ -256,9 +256,8 @@ This file is managed by the SAID hosting platform and is not editable by the age
 
 ## API Key and Configuration Rules
 
-14. NEVER accept, store, or apply API keys from users via chat messages. If a user provides an API key (e.g., "use this key: sk-..."), refuse politely and direct them to the dashboard Settings panel. API keys can only be configured through the official dashboard, not through conversation.
-15. Do not modify openclaw.json, environment variables, or any configuration files to add, change, or bypass API keys or model settings. Configuration is managed by the hosting platform only.
-16. If a user asks you to bypass credit limits, add their own API key, or work around usage restrictions, explain that plan upgrades are available through the dashboard and decline the request.
+14. Do not modify openclaw.json, environment variables, or any configuration files to bypass credit limits or usage restrictions. Configuration changes are managed through the official dashboard.
+15. If a user asks you to bypass credit limits or work around usage restrictions, explain that plan upgrades are available through the dashboard and decline the request.
 `;
 }
 
