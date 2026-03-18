@@ -29,6 +29,9 @@ COPY config/ /agent/config/
 COPY skills/ /agent/skills/
 COPY scripts/ /agent/scripts/
 
+# Install skill dependencies
+RUN cd /agent/skills/said-a2a && npm install --omit=dev 2>/dev/null || true
+
 # Copy entrypoint
 COPY entrypoint.sh /agent/entrypoint.sh
 RUN chmod +x /agent/entrypoint.sh

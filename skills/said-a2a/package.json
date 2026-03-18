@@ -1,0 +1,11 @@
+{
+  "name": "said-a2a-skill",
+  "version": "1.0.0",
+  "description": "OpenClaw skill for SAID A2A communication",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@said-protocol/a2a": "^1.0.0",
+    "@solana/web3.js": "^1.95.8"
+  }
+}
