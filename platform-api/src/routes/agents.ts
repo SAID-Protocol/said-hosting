@@ -63,6 +63,21 @@ agentRouter.post('/', async (req, res) => {
   try {
     const userId = (req as typeof req & { userId: string }).userId;
     const payload = req.body as CreateAgentRequest;
+
+    // Guard: prevent duplicate agents with the same Telegram bot token
+    if (payload.telegram_token) {
+      const existing = await listAgents(userId);
+      const duplicate = existing.find((a: any) => a.telegramBotToken === payload.telegram_token);
+      if (duplicate) {
+        res.status(409).json({ 
+          error: 'An agent with this Telegram bot token already exists',
+          existingAgentId: duplicate.id,
+          existingAgentName: duplicate.name
+        });
+        return;
+      }
+    }
+
     const agent = await createAgent(userId, payload);
     res.status(201).json(agent);
   } catch (error) {
