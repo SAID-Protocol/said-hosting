@@ -110,6 +110,18 @@ agentRouter.get('/:id', async (req, res) => {
 agentRouter.patch('/:id', async (req, res) => {
   try {
     const userId = (req as typeof req & { userId: string }).userId;
+    
+    // Block API key updates for free tier
+    const hasKeyUpdate = req.body.anthropic_key || req.body.openai_key || req.body.openrouter_key;
+    if (hasKeyUpdate) {
+      const existing = await getAgentById(userId, req.params.id);
+      if (existing && existing.tier === 'free') {
+        return res.status(403).json({ 
+          error: 'API key customization requires a paid plan. Upgrade to Starter ($39/mo) or higher.' 
+        });
+      }
+    }
+    
     const agent = await updateAgent(userId, req.params.id, {
       program_md: req.body.program_md,
       config: req.body.config,
