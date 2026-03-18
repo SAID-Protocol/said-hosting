@@ -36,8 +36,8 @@ RUN cd /agent/skills/said-a2a && npm install --omit=dev 2>/dev/null || true
 COPY entrypoint.sh /agent/entrypoint.sh
 RUN chmod +x /agent/entrypoint.sh
 
-# Persistent Fly volume mount point (matches fly.toml mount destination)
-VOLUME ["/agent/data"]
+# Persistent volume mount point
+VOLUME ["/data"]
 
 # OpenClaw gateway port
 EXPOSE 18789
@@ -57,6 +57,6 @@ RUN useradd -m -s /bin/bash agent
 RUN chown -R agent:agent /agent /data
 
 # Wrapper script: enable swap as root, then exec entrypoint as agent
-RUN printf '#!/bin/bash\nswapon /agent/swapfile 2>/dev/null || true\nexec su -s /bin/bash agent -c "/agent/entrypoint.sh"\n' > /agent/start.sh && chmod +x /agent/start.sh
+RUN printf '#!/bin/bash\nswapon /agent/swapfile 2>/dev/null || true\nchown -R agent:agent /data 2>/dev/null || true\nexec su -s /bin/bash agent -c "/agent/entrypoint.sh"\n' > /agent/start.sh && chmod +x /agent/start.sh
 
 ENTRYPOINT ["/agent/start.sh"]

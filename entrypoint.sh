@@ -107,6 +107,8 @@ if [ -n "$OPENROUTER_API_KEY" ]; then
 else
   echo "[said-hosting] Using direct Anthropic API key"
   node -e "
+    const tgToken = process.env.SAID_TELEGRAM_TOKEN;
+    const gwToken = process.env.GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN;
     const config = {
       meta: {
         lastTouchedVersion: '2026.3.8',
@@ -115,8 +117,19 @@ else
       gateway: {
         controlUi: {
           dangerouslyAllowHostHeaderOriginFallback: true
-        }
+        },
+        auth: gwToken ? { mode: 'token', token: gwToken } : undefined
       },
+      channels: tgToken ? {
+        telegram: {
+          enabled: true,
+          botToken: tgToken,
+          dmPolicy: 'open',
+          allowFrom: ['*'],
+          groupPolicy: 'open',
+          groupAllowFrom: ['*']
+        }
+      } : {},
       agents: { defaults: { model: { primary: 'anthropic/claude-sonnet-4-5' } } },
       env: {
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
@@ -124,6 +137,7 @@ else
         SAID_WALLET_ADDRESS: process.env.SAID_WALLET_ADDRESS
       }
     };
+    if (!config.gateway.auth) delete config.gateway.auth;
     require('fs').writeFileSync('$OPENCLAW_DIR/openclaw.json', JSON.stringify(config, null, 2));
   "
 fi
