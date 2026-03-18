@@ -1,5 +1,7 @@
 FROM node:22-slim AS builder
 
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY package*.json ./
 COPY prisma/ ./prisma/

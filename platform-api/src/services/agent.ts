@@ -110,7 +110,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         config: payload.config ? JSON.stringify(payload.config) : null,
         gatewayTokenHash,
         aiCreditsLimit: tierConfig.aiCredits,
-        openrouterKeyHash: orKey.hash,
+        openrouterKeyHash: orKeyHash,
         fundingStatus: 'pending',
         fundingAmountUsdc: getFundingAmountUsdc(tier),
         user: {
@@ -121,7 +121,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         },
       },
     });
-    logActivity(agentId, 'system', `Agent created on Hetzner (port ${container.port}) with OpenRouter key (limit: $${orKey.limit}/mo)`);
+    logActivity(agentId, 'system', `Agent created on Hetzner (port ${container.port})${payload.custom_api_key ? ' with custom API key' : ' with managed OpenRouter key'}`);
     
     // Return agent with plaintext gateway token (only time it's exposed)
     return { ...agent, gatewayToken };

@@ -39,6 +39,7 @@ export interface CreateAgentRequest {
   program_md?: string;
   config?: Record<string, unknown>;
   telegram_token?: string;
+  custom_api_key?: string;
 }
 
 export type TierConfig = {
