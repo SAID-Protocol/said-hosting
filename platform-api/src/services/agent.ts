@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../db';
 import { CreateAgentRequest, TIER_CONFIGS } from '../types';
-import { createContainer, deleteContainer, getContainer, startContainer, stopContainer, updateContainerEnv } from './hetzner';
+import { createContainer, deleteContainer, getContainer, startContainer, stopContainer, updateContainerEnv, updateContainerEnvBatch } from './hetzner';
 import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
 import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 import { generateWorkspace, WorkspaceConfig } from './workspace';
@@ -285,18 +285,24 @@ export async function getAgentById(userId: string, agentId: string) {
   });
 }
 
-export async function updateAgent(userId: string, agentId: string, updates: { program_md?: string | null; config?: Record<string, unknown> | null; custom_api_key?: string; name?: string }) {
+export async function updateAgent(userId: string, agentId: string, updates: { program_md?: string | null; config?: Record<string, unknown> | null; name?: string; anthropic_key?: string; openai_key?: string; openrouter_key?: string }) {
   const existing = await getAgentById(userId, agentId);
   if (!existing) throw new Error('Agent not found');
 
-  // If custom API key provided, update the container's OpenRouter key
-  if (updates.custom_api_key?.trim()) {
+  // Update API keys on the container if provided
+  const keyUpdates: [string, string][] = [];
+  if (updates.anthropic_key?.trim()) keyUpdates.push(['ANTHROPIC_API_KEY', updates.anthropic_key.trim()]);
+  if (updates.openai_key?.trim()) keyUpdates.push(['OPENAI_API_KEY', updates.openai_key.trim()]);
+  if (updates.openrouter_key?.trim()) keyUpdates.push(['OPENROUTER_API_KEY', updates.openrouter_key.trim()]);
+
+  if (keyUpdates.length > 0) {
     try {
-      await updateContainerEnv(agentId, 'OPENROUTER_API_KEY', updates.custom_api_key.trim());
-      logActivity(agentId, 'system', 'Custom API key configured');
+      await updateContainerEnvBatch(agentId, keyUpdates);
+      const providers = keyUpdates.map(([k]) => k.replace('_API_KEY', '').toLowerCase()).join(', ');
+      logActivity(agentId, 'system', `API keys updated: ${providers}`);
     } catch (err) {
-      console.error('[updateAgent] Failed to update container API key:', err);
-      throw new Error('Failed to update API key on container');
+      console.error('[updateAgent] Failed to update container API keys:', err);
+      throw new Error('Failed to update API keys on container');
     }
   }
 

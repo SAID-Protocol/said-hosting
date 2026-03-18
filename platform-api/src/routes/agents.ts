@@ -113,8 +113,10 @@ agentRouter.patch('/:id', async (req, res) => {
     const agent = await updateAgent(userId, req.params.id, {
       program_md: req.body.program_md,
       config: req.body.config,
-      custom_api_key: req.body.custom_api_key,
       name: req.body.name,
+      anthropic_key: req.body.anthropic_key,
+      openai_key: req.body.openai_key,
+      openrouter_key: req.body.openrouter_key,
     });
     res.json(agent);
   } catch (error) {

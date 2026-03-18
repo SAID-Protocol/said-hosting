@@ -284,6 +284,22 @@ export async function updateContainerEnv(agentId: string, key: string, value: st
 }
 
 /**
+ * Update multiple env vars in a container's openclaw.json and restart once
+ */
+export async function updateContainerEnvBatch(agentId: string, entries: [string, string][]): Promise<void> {
+  const containerName = getContainerName(agentId);
+  const assignments = entries.map(([k, v]) => `config.env['${k}'] = '${v.replace(/'/g, "'\\''")}';`).join('\n    ');
+  await sshExec(`docker exec ${containerName} node -e "
+    const fs = require('fs');
+    const config = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));
+    if (!config.env) config.env = {};
+    ${assignments}
+    fs.writeFileSync('/data/openclaw.json', JSON.stringify(config, null, 2));
+    console.log('Updated ${entries.length} keys');
+  " && docker restart ${containerName}`);
+}
+
+/**
  * Health check — verify SSH connection to Hetzner
  */
 export async function healthCheck(): Promise<boolean> {
