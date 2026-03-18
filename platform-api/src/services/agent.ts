@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../db';
 import { CreateAgentRequest, TIER_CONFIGS } from '../types';
-import { createContainer, deleteContainer, getContainer, startContainer, stopContainer } from './hetzner';
+import { createContainer, deleteContainer, getContainer, startContainer, stopContainer, updateContainerEnv } from './hetzner';
 import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
 import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 import { generateWorkspace, WorkspaceConfig } from './workspace';
@@ -72,8 +72,17 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   let containerId: string | null = null;
   let orKeyHash: string | null = null;
   try {
-    const orKey = await createAgentKey(agentId, payload.name.trim(), tier);
-    orKeyHash = orKey.hash;
+    // Use custom API key if provided, otherwise create a managed OpenRouter key
+    let apiKey: string;
+    if (payload.custom_api_key?.trim()) {
+      apiKey = payload.custom_api_key.trim();
+      console.log('[createAgent] Using custom API key (user-provided)');
+    } else {
+      const orKey = await createAgentKey(agentId, payload.name.trim(), tier);
+      orKeyHash = orKey.hash;
+      apiKey = orKey.key;
+      console.log('[createAgent] Using managed OpenRouter key');
+    }
 
     const container = await createContainer({
       agentId,
@@ -83,7 +92,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
       programMd: payload.program_md,
       config: payload.config ? JSON.stringify(payload.config) : undefined,
       workspaceFiles: JSON.stringify(workspace.files),
-      openRouterKey: orKey.key,
+      openRouterKey: apiKey,
       telegramToken: payload.telegram_token,
       gatewayToken,
     });
@@ -276,13 +285,25 @@ export async function getAgentById(userId: string, agentId: string) {
   });
 }
 
-export async function updateAgent(userId: string, agentId: string, updates: { program_md?: string | null; config?: Record<string, unknown> | null }) {
+export async function updateAgent(userId: string, agentId: string, updates: { program_md?: string | null; config?: Record<string, unknown> | null; custom_api_key?: string; name?: string }) {
   const existing = await getAgentById(userId, agentId);
   if (!existing) throw new Error('Agent not found');
+
+  // If custom API key provided, update the container's OpenRouter key
+  if (updates.custom_api_key?.trim()) {
+    try {
+      await updateContainerEnv(agentId, 'OPENROUTER_API_KEY', updates.custom_api_key.trim());
+      logActivity(agentId, 'system', 'Custom API key configured');
+    } catch (err) {
+      console.error('[updateAgent] Failed to update container API key:', err);
+      throw new Error('Failed to update API key on container');
+    }
+  }
 
   return prisma.agent.update({
     where: { id: agentId },
     data: {
+      name: updates.name ?? existing.name,
       programMd: updates.program_md ?? existing.programMd,
       config: updates.config === undefined ? existing.config : updates.config === null ? null : JSON.stringify(updates.config),
     },

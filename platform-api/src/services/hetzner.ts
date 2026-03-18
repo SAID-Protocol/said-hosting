@@ -267,6 +267,23 @@ export async function listContainers(): Promise<ContainerInfo[]> {
 }
 
 /**
+ * Update an environment variable in a running container's openclaw.json and restart
+ */
+export async function updateContainerEnv(agentId: string, key: string, value: string): Promise<void> {
+  const containerName = getContainerName(agentId);
+  // Update the openclaw.json env section and restart
+  const escapedValue = value.replace(/'/g, "'\\''");
+  await sshExec(`docker exec ${containerName} node -e "
+    const fs = require('fs');
+    const config = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));
+    if (!config.env) config.env = {};
+    config.env['${key}'] = '${escapedValue}';
+    fs.writeFileSync('/data/openclaw.json', JSON.stringify(config, null, 2));
+    console.log('Updated ${key}');
+  " && docker restart ${containerName}`);
+}
+
+/**
  * Health check — verify SSH connection to Hetzner
  */
 export async function healthCheck(): Promise<boolean> {
