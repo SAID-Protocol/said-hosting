@@ -47,7 +47,7 @@ HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=5 \
   CMD curl -f http://localhost:18789/health || exit 1
 
 # Create swap file for memory overflow (allows 2GB machines to handle 1.8GB RSS)
-RUN fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile
+RUN fallocate -l 1G /agent/swapfile && chmod 600 /agent/swapfile && mkswap /agent/swapfile
 
 # Cap V8 heap to leave room for OS + extensions
 ENV NODE_OPTIONS="--max-old-space-size=1536"
@@ -57,6 +57,6 @@ RUN useradd -m -s /bin/bash agent
 RUN chown -R agent:agent /agent /data
 
 # Wrapper script: enable swap as root, then exec entrypoint as agent
-RUN printf '#!/bin/bash\nswapon /swapfile 2>/dev/null || true\nexec su -s /bin/bash agent -c "/agent/entrypoint.sh"\n' > /agent/start.sh && chmod +x /agent/start.sh
+RUN printf '#!/bin/bash\nswapon /agent/swapfile 2>/dev/null || true\nexec su -s /bin/bash agent -c "/agent/entrypoint.sh"\n' > /agent/start.sh && chmod +x /agent/start.sh
 
 ENTRYPOINT ["/agent/start.sh"]
