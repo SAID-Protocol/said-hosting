@@ -179,15 +179,20 @@ export async function processUserBilling(userId: string): Promise<string> {
   if (balance >= amountDue) {
     try {
       // Build and sign the transaction via Privy
-      // TODO: Wire up Privy server-side signing with authorization key
-      const { transaction, amountUsdc } = await buildBillingTransaction(
-        user.privyWalletAddress,
-        amountDue,
-      );
+      const amountUsdc = amountDue; // USDC is 1:1 with USD
       
-      // TODO: Submit transaction via Privy signer API
-      // const txSignature = await signAndSubmitViaPripy(transaction, user.privyId);
-      const txSignature = null; // Placeholder until Privy signing is wired
+      // Sign and submit via Privy server-side signing
+      let txSignature: string | null = null;
+      if (user.privyId) {
+        const { signAndSubmitBillingTx } = await import('./privy-billing');
+        txSignature = await signAndSubmitBillingTx(user.privyId, amountDue);
+      }
+      
+      if (!txSignature) {
+        console.error(`[billing] Failed to submit billing tx for user ${userId}`);
+        // Don't enter grace yet — might be a temporary issue. Retry next cron run.
+        return 'error';
+      }
       
       // Update billing status
       const nextBilling = new Date();
