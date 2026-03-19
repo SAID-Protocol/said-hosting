@@ -25,6 +25,7 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
       'http://localhost:3000',
       'http://localhost:3001',
       'https://host.saidprotocol.com',
+      'https://hosting-site-test-production.up.railway.app',
     ];
 
 app.use(cors({
