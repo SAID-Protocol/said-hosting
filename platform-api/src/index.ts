@@ -5,6 +5,7 @@ import { initDb, prisma } from './db';
 import { agentRouter } from './routes/agents';
 import { billingRouter } from './routes/billing';
 import { runBillingCron } from './services/billing';
+import { authMiddleware } from './middleware/auth';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -66,8 +67,8 @@ app.get('/api/stats', async (_req, res) => {
   }
 });
 
-app.use('/api/agents', agentRouter);
-app.use('/api/billing', billingRouter);
+app.use('/api/agents', authMiddleware, agentRouter);
+app.use('/api/billing', authMiddleware, billingRouter);
 
 async function start() {
   await initDb();
