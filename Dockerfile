@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
 # Install OpenClaw + Solana bootstrap dependencies globally
 RUN npm install -g openclaw@2026.3.12 @solana/web3.js @solana/spl-token tweetnacl bs58
 
+# Install Prisma CLI globally for database migrations
+RUN npm install -g prisma
+
 # Pre-install Telegram extension dependencies (avoids first-load hang in container)
 RUN cd /usr/local/lib/node_modules/openclaw/extensions/telegram && npm install 2>/dev/null || true
 
