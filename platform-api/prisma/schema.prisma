@@ -23,6 +23,7 @@ model User {
   paymentToken        String    @default("USDC") @map("payment_token") // USDC, SAID, SOL
   monthlyAmountUsd    Float?    @map("monthly_amount_usd")
   graceStartedAt      DateTime? @map("grace_started_at")
+  signerConsented     Boolean   @default(false) @map("signer_consented")
   createdAt           DateTime  @default(now()) @map("created_at")
   agents              Agent[]
   payments            Payment[]

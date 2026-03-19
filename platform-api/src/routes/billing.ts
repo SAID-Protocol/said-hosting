@@ -148,6 +148,32 @@ billingRouter.get('/pricing', (_req, res) => {
 /**
  * GET /api/billing/payments — Payment history for authenticated user
  */
+/**
+ * GET /api/billing/signer-status — Check if user has consented to server-side signing
+ */
+billingRouter.get('/signer-status', async (req, res) => {
+  try {
+    const userId = (req as typeof req & { userId: string }).userId;
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { signerConsented: true } });
+    res.json({ consented: user?.signerConsented ?? false });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check signer status' });
+  }
+});
+
+/**
+ * POST /api/billing/signer-consented — Mark that user has granted addSigners consent
+ */
+billingRouter.post('/signer-consented', async (req, res) => {
+  try {
+    const userId = (req as typeof req & { userId: string }).userId;
+    await prisma.user.update({ where: { id: userId }, data: { signerConsented: true } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update signer consent' });
+  }
+});
+
 billingRouter.get('/payments', async (req, res) => {
   try {
     const userId = (req as typeof req & { userId: string }).userId;
