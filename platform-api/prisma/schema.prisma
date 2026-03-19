@@ -8,15 +8,44 @@ datasource db {
 }
 
 model User {
-  id         String   @id @default(uuid())
-  privyId    String?  @unique @map("privy_id")
-  email      String?
-  tier       String   @default("starter")
-  saidPubkey String?  @map("said_pubkey")
-  createdAt  DateTime @default(now()) @map("created_at")
-  agents     Agent[]
+  id                  String    @id @default(uuid())
+  privyId             String?   @unique @map("privy_id")
+  email               String?
+  tier                String    @default("starter")
+  saidPubkey          String?   @map("said_pubkey")
+  privyWalletAddress  String?   @map("privy_wallet_address")
+  billingStatus       String    @default("none") @map("billing_status") // none, trial, active, grace, paused, cancelled
+  billingMode         String    @default("all_inclusive") @map("billing_mode") // all_inclusive, byok
+  trialEndsAt         DateTime? @map("trial_ends_at")
+  nextBillingDate     DateTime? @map("next_billing_date")
+  lastPaymentAt       DateTime? @map("last_payment_at")
+  lastPaymentTx       String?   @map("last_payment_tx")
+  paymentToken        String    @default("USDC") @map("payment_token") // USDC, SAID, SOL
+  monthlyAmountUsd    Float?    @map("monthly_amount_usd")
+  graceStartedAt      DateTime? @map("grace_started_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  agents              Agent[]
+  payments            Payment[]
 
   @@map("users")
+}
+
+model Payment {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  agentId       String?  @map("agent_id")
+  amountUsd     Float    @map("amount_usd")
+  token         String   // USDC, SAID, SOL
+  tokenAmount   Float    @map("token_amount")
+  txSignature   String?  @map("tx_signature")
+  status        String   // pending, success, failed
+  type          String   // subscription, topup, trial_start
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user  User   @relation(fields: [userId], references: [id])
+  agent Agent? @relation(fields: [agentId], references: [id])
+
+  @@map("payments")
 }
 
 model Agent {
@@ -50,6 +79,7 @@ model Agent {
 
   user     User       @relation(fields: [userId], references: [id])
   activity Activity[]
+  payments Payment[]
 
   @@map("agents")
 }
