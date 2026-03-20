@@ -90,8 +90,40 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         const monthlyPrice = 29; // Starter tier minimum
         
         if (balance >= monthlyPrice) {
-          console.log('[createAgent] Trial expired but user has funds - auto-activating subscription');
-          // Update billing status to active (monthly cron will charge based on active agents)
+          console.log('[createAgent] User has funds - upgrading trial agent to paid tier');
+          
+          // Find trial agent and upgrade it
+          const trialAgent = existingAgents.find(a => a.tier === 'trial');
+          if (trialAgent) {
+            const { deleteKey, createKey } = await import('./openrouter');
+            const upgradeTier = payload.tier || 'starter'; // Use selected tier
+            
+            // Delete old $5 trial key
+            if (trialAgent.openrouterKeyHash) {
+              try {
+                await deleteKey(trialAgent.openrouterKeyHash);
+                console.log('[createAgent] Deleted trial OpenRouter key');
+              } catch (err) {
+                console.warn('[createAgent] Failed to delete trial key:', err);
+              }
+            }
+            
+            // Create new key with proper monthly limit
+            const { keyHash: newKeyHash } = await createKey(upgradeTier, 'all_inclusive');
+            
+            // Update agent: tier + new key
+            await prisma.agent.update({
+              where: { id: trialAgent.id },
+              data: {
+                tier: upgradeTier,
+                openrouterKeyHash: newKeyHash,
+              },
+            });
+            
+            console.log(`[createAgent] Upgraded trial agent ${trialAgent.id} from trial → ${upgradeTier}`);
+          }
+          
+          // Update billing status to active
           await prisma.user.update({
             where: { id: userId },
             data: {
@@ -99,7 +131,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
             },
           });
           user.billingStatus = 'active';
-          // Continue to create agent with selected tier
+          // Continue to create 2nd agent with selected tier
         } else {
           throw new Error(`Trial limited to 1 agent. Add at least $${monthlyPrice} USDC to your wallet to create more agents.`);
         }
