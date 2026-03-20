@@ -284,6 +284,15 @@ agentRouter.post('/:id/chat', async (req, res) => {
       res.status(response.status).json({ ok: response.ok, data });
     } catch (fetchError) {
       clearTimeout(timeoutId);
+      // Connection refused = container still booting
+      const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      if (msg.includes('fetch failed') || msg.includes('ECONNREFUSED') || msg.includes('UND_ERR_CONNECT_TIMEOUT')) {
+        res.status(503).json({ 
+          error: 'Agent is still starting up. Please try again in a few seconds.',
+          retryAfter: 5
+        });
+        return;
+      }
       throw fetchError;
     }
   } catch (error) {
