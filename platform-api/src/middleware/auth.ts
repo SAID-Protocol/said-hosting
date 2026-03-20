@@ -20,12 +20,28 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
         const verifiedClaims = await privyClient.verifyAuthToken(token);
         const privyUserId = verifiedClaims.userId; // e.g., "did:privy:xxx"
         
+        // Fetch user details from Privy to get wallet address
+        let walletAddress: string | null = null;
+        try {
+          const privyUser = await privyClient.getUserById(privyUserId);
+          // Get the first Solana wallet (Privy creates embedded Solana wallets)
+          const solanaWallet = privyUser.linkedAccounts?.find((acc: any) => 
+            acc.type === 'wallet' && acc.chainType === 'solana'
+          );
+          if (solanaWallet) {
+            walletAddress = solanaWallet.address;
+          }
+        } catch (privyFetchError) {
+          console.error('[auth] Failed to fetch Privy user wallet:', privyFetchError);
+        }
+        
         // Auto-create or get existing user
         const user = await prisma.user.upsert({
           where: { privyId: privyUserId },
-          update: {},
+          update: walletAddress ? { privyWalletAddress: walletAddress } : {},
           create: {
             privyId: privyUserId,
+            privyWalletAddress: walletAddress,
           },
         });
         
