@@ -95,7 +95,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
           // Find trial agent and upgrade it
           const trialAgent = existingAgents.find(a => a.tier === 'trial');
           if (trialAgent) {
-            const { deleteKey, createKey } = await import('./openrouter');
+            const { deleteKey, createAgentKey } = await import('./openrouter');
             const upgradeTier = payload.tier || 'starter'; // Use selected tier
             
             // Delete old $5 trial key
@@ -109,7 +109,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
             }
             
             // Create new key with proper monthly limit
-            const { keyHash: newKeyHash } = await createKey(upgradeTier, 'all_inclusive');
+            const { hash: newKeyHash } = await createAgentKey(trialAgent.id, trialAgent.name, upgradeTier);
             
             // Update agent: tier + new key
             await prisma.agent.update({
