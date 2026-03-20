@@ -4,6 +4,7 @@ import cors from 'cors';
 import { initDb, prisma } from './db';
 import { agentRouter } from './routes/agents';
 import { billingRouter } from './routes/billing';
+import { balanceRouter } from './routes/balance';
 import { runBillingCron } from './services/billing';
 import { authMiddleware } from './middleware/auth';
 
@@ -69,6 +70,7 @@ app.get('/api/stats', async (_req, res) => {
 
 app.use('/api/agents', authMiddleware, agentRouter);
 app.use('/api/billing', authMiddleware, billingRouter);
+app.use('/api/balance', balanceRouter); // Public endpoint - no auth needed
 
 async function start() {
   await initDb();
