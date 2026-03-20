@@ -51,9 +51,10 @@ export interface OpenRouterKeyInfo {
 // Tier → OpenRouter credit limit (USD)
 const TIER_CREDIT_LIMITS: Record<string, number> = {
   free: 1,
-  starter: 5,
-  pro: 15,
-  power: 50,
+  trial: 5,      // $5 total for 3-day trial, no reset
+  starter: 10,   // Updated from $5 to match pricing discussion
+  pro: 30,       // Updated from $15 to match pricing discussion  
+  power: 75,     // Updated from $50 to match pricing discussion
 };
 
 /**

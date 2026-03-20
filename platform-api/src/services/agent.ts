@@ -15,7 +15,7 @@ function logActivity(agentId: string, type: string, data: string) {
   prisma.activity.create({ data: { agentId, type, data } }).catch(console.error);
 }
 
-function buildWorkspaceConfig(payload: CreateAgentRequest, tier: 'free' | 'starter' | 'pro' | 'power'): WorkspaceConfig {
+function buildWorkspaceConfig(payload: CreateAgentRequest, tier: 'free' | 'trial' | 'starter' | 'pro' | 'power'): WorkspaceConfig {
   const rawConfig = (payload.config ?? {}) as Record<string, unknown>;
   const personality = (rawConfig.personality ?? {}) as Record<string, unknown>;
   const spendingLimits = (rawConfig.spendingLimits ?? rawConfig.spending_limits ?? {}) as Record<string, unknown>;

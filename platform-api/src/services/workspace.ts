@@ -1,6 +1,6 @@
 export type AgentTemplate = 'research' | 'customer-support' | 'task-automator' | 'content-creator' | 'personal-assistant' | 'custom';
 export type AgentAutonomy = 'supervised' | 'balanced' | 'autonomous';
-export type AgentTier = 'free' | 'starter' | 'pro' | 'power';
+export type AgentTier = 'free' | 'trial' | 'starter' | 'pro' | 'power';
 
 export interface PersonalityConfig {
   communication?: number | string | null;

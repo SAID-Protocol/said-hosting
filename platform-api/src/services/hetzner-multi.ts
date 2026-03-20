@@ -21,7 +21,7 @@ if (process.env.HETZNER_SSH_KEY_B64 && !fs.existsSync(HETZNER_SSH_KEY)) {
   console.log('[hetzner] SSH key written from env');
 }
 
-type TierKey = 'free' | 'starter' | 'pro' | 'power';
+type TierKey = 'free' | 'trial' | 'starter' | 'pro' | 'power';
 
 type ContainerInfo = {
   id: string;
