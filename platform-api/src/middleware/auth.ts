@@ -26,6 +26,10 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
           update: {},
           create: {
             privyId: privyUserId,
+            billingStatus: 'trial',
+            billingMode: 'all_inclusive',
+            trialEndsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 days from now
+            tier: 'starter',
           },
         });
         
