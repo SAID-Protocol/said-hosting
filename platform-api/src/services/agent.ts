@@ -58,12 +58,20 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   const agentId = generateId();
   
   // Check if user is on trial - if so, force trial tier regardless of selection
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: { agents: true } });
   let tier = payload.tier ?? 'starter';
   
   if (user?.billingStatus === 'trial') {
+    // Trial users limited to 1 agent
+    const existingAgents = user.agents.filter(a => a.status !== 'error').length;
+    if (existingAgents >= 1) {
+      throw new Error('Trial limited to 1 agent. Upgrade to create more agents.');
+    }
     tier = 'trial';
     console.log('[createAgent] User on trial - overriding tier to "trial"');
+  } else if (user?.billingStatus === 'none' || user?.billingStatus === 'paused' || user?.billingStatus === 'cancelled') {
+    // Post-trial: require active subscription or grace period
+    throw new Error('Please add funds to create agents. Visit billing settings to activate your subscription.');
   }
   
   const tierConfig = TIER_CONFIGS[tier];

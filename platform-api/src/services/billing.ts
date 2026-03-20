@@ -168,13 +168,26 @@ export async function processUserBilling(userId: string): Promise<string> {
     include: { agents: true },
   });
   
-  if (!user || !user.privyWalletAddress || !user.monthlyAmountUsd) {
+  if (!user || !user.privyWalletAddress) {
     return 'error';
   }
   
+  // Calculate total amount due based on all active agents (per-agent billing)
+  const activeAgents = user.agents.filter(a => a.status === 'running' || a.status === 'paused');
+  
+  if (activeAgents.length === 0) {
+    console.log(`[billing] User ${userId} has no active agents - skipping billing`);
+    return 'paid'; // No agents = no charges
+  }
+  
+  const amountDue = activeAgents.reduce((total, agent) => {
+    return total + getMonthlyPrice(agent.tier, user.billingMode);
+  }, 0);
+  
+  console.log(`[billing] User ${userId} has ${activeAgents.length} agents - total due: $${amountDue}`);
+  
   // Check USDC balance
   const balance = await getWalletUsdcBalance(user.privyWalletAddress);
-  const amountDue = user.monthlyAmountUsd;
   
   if (balance >= amountDue) {
     try {
