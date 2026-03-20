@@ -56,7 +56,16 @@ function buildWorkspaceConfig(payload: CreateAgentRequest, tier: 'free' | 'trial
 export async function createAgent(userId: string, payload: CreateAgentRequest) {
   console.log('[createAgent] telegram_token present:', !!payload.telegram_token, 'tier:', payload.tier);
   const agentId = generateId();
-  const tier = payload.tier ?? 'starter';
+  
+  // Check if user is on trial - if so, force trial tier regardless of selection
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  let tier = payload.tier ?? 'starter';
+  
+  if (user?.billingStatus === 'trial') {
+    tier = 'trial';
+    console.log('[createAgent] User on trial - overriding tier to "trial"');
+  }
+  
   const tierConfig = TIER_CONFIGS[tier];
   const gatewayToken = generateGatewayToken();
   const gatewayTokenHash = hashGatewayToken(gatewayToken);
