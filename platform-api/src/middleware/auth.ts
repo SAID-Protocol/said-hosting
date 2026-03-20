@@ -42,6 +42,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
         }
         
         // Auto-create or get existing user
+        console.log('[auth] Upserting user with privyId:', privyUserId, 'wallet:', walletAddress);
         const user = await prisma.user.upsert({
           where: { privyId: privyUserId },
           update: walletAddress ? { privyWalletAddress: walletAddress } : {},
@@ -50,6 +51,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
             privyWalletAddress: walletAddress,
           },
         });
+        console.log('[auth] User after upsert:', user.id, 'wallet in DB:', user.privyWalletAddress);
         
         (req as Request & { userId: string }).userId = user.id;
         next();
