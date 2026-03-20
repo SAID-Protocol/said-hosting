@@ -81,12 +81,35 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   let tier = payload.tier ?? 'starter';
   
   if (user.billingStatus === 'trial') {
-    // Trial users limited to 1 agent
+    // Trial users limited to 1 agent, but check if they have funds to upgrade
     if (existingAgents.length >= 1) {
-      throw new Error('Trial limited to 1 agent. Upgrade to create more agents.');
+      // Check if user has sufficient USDC to pay for this agent
+      if (user.privyWalletAddress) {
+        const { getWalletUsdcBalance } = await import('./billing');
+        const balance = await getWalletUsdcBalance(user.privyWalletAddress);
+        const monthlyPrice = 29; // Starter tier minimum
+        
+        if (balance >= monthlyPrice) {
+          console.log('[createAgent] Trial expired but user has funds - auto-activating subscription');
+          // Update billing status to active (monthly cron will charge based on active agents)
+          await prisma.user.update({
+            where: { id: userId },
+            data: {
+              billingStatus: 'active',
+            },
+          });
+          user.billingStatus = 'active';
+          // Continue to create agent with selected tier
+        } else {
+          throw new Error(`Trial limited to 1 agent. Add at least $${monthlyPrice} USDC to your wallet to create more agents.`);
+        }
+      } else {
+        throw new Error('Trial limited to 1 agent. Add funds to your wallet to create more agents.');
+      }
+    } else {
+      tier = 'trial';
+      console.log('[createAgent] User on trial - overriding tier to "trial"');
     }
-    tier = 'trial';
-    console.log('[createAgent] User on trial - overriding tier to "trial"');
   } else if (user.billingStatus === 'none' || user.billingStatus === 'paused' || user.billingStatus === 'cancelled') {
     // Post-trial: require active subscription or grace period
     throw new Error('Please add funds to create agents. Visit billing settings to activate your subscription.');
