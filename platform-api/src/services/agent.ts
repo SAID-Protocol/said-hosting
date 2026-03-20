@@ -57,19 +57,37 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   console.log('[createAgent] telegram_token present:', !!payload.telegram_token, 'tier:', payload.tier);
   const agentId = generateId();
   
-  // Check if user is on trial - if so, force trial tier regardless of selection
+  // Get user with existing agents
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { agents: true } });
+  
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  const existingAgents = user.agents.filter(a => a.status !== 'error');
+  
+  // Auto-start trial for first agent if user has no agents and no trial/subscription
+  if (existingAgents.length === 0 && (user.billingStatus === 'none' || !user.billingStatus)) {
+    console.log('[createAgent] Auto-starting trial for first agent');
+    const { startTrial } = await import('./billing');
+    await startTrial(userId, payload.tier || 'starter', 'all_inclusive');
+    // Reload user to get updated billing status
+    const updatedUser = await prisma.user.findUnique({ where: { id: userId }, include: { agents: true } });
+    if (updatedUser) {
+      Object.assign(user, updatedUser);
+    }
+  }
+  
   let tier = payload.tier ?? 'starter';
   
-  if (user?.billingStatus === 'trial') {
+  if (user.billingStatus === 'trial') {
     // Trial users limited to 1 agent
-    const existingAgents = user.agents.filter(a => a.status !== 'error').length;
-    if (existingAgents >= 1) {
+    if (existingAgents.length >= 1) {
       throw new Error('Trial limited to 1 agent. Upgrade to create more agents.');
     }
     tier = 'trial';
     console.log('[createAgent] User on trial - overriding tier to "trial"');
-  } else if (user?.billingStatus === 'none' || user?.billingStatus === 'paused' || user?.billingStatus === 'cancelled') {
+  } else if (user.billingStatus === 'none' || user.billingStatus === 'paused' || user.billingStatus === 'cancelled') {
     // Post-trial: require active subscription or grace period
     throw new Error('Please add funds to create agents. Visit billing settings to activate your subscription.');
   }
