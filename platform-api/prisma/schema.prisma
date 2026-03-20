@@ -75,6 +75,7 @@ model Agent {
   aiCreditsUsed        Float    @default(0) @map("ai_credits_used")
   aiCreditsLimit       Float    @default(5) @map("ai_credits_limit")
   openrouterKeyHash    String?  @map("openrouter_key_hash")
+  hostIp               String?  @map("host_ip")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
