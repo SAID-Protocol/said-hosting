@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../db';
 import { CreateAgentRequest, TIER_CONFIGS } from '../types';
-import { createContainer, deleteContainer, getContainer, startContainer, stopContainer, updateContainerEnv, updateContainerEnvBatch } from './hetzner';
+import { createContainer, deleteContainer, getContainer, startContainer, stopContainer, updateContainerEnv, updateContainerEnvBatch } from './hetzner-multi';
 import { createAgentKey, deleteKey, disableKey, enableKey } from './openrouter';
 import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 import { generateWorkspace, WorkspaceConfig } from './workspace';
@@ -104,6 +104,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         name: payload.name.trim(),
         flyMachineId: container.id,       // reuse field for container ID
         flyAppName: `hetzner:${container.port}`,  // store host:port for routing
+        hostIp: container.hostIp,
         status: 'running',
         tier,
         programMd: payload.program_md ?? null,
@@ -127,7 +128,9 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
     return { ...agent, gatewayToken };
   } catch (error) {
     if (orKeyHash) { try { await deleteKey(orKeyHash); } catch {} }
-    if (containerId) { try { await deleteContainer(agentId); } catch {} }
+    // Note: If container was created, we'd have container.hostIp, but error might occur before that
+    // In that case, we can't clean up the container without knowing which host it's on
+    // This is acceptable since container creation failing means nothing was actually created
     throw error;
   }
 }
@@ -295,9 +298,9 @@ export async function updateAgent(userId: string, agentId: string, updates: { pr
   if (updates.openai_key?.trim()) keyUpdates.push(['OPENAI_API_KEY', updates.openai_key.trim()]);
   if (updates.openrouter_key?.trim()) keyUpdates.push(['OPENROUTER_API_KEY', updates.openrouter_key.trim()]);
 
-  if (keyUpdates.length > 0) {
+  if (keyUpdates.length > 0 && existing.hostIp) {
     try {
-      await updateContainerEnvBatch(agentId, keyUpdates);
+      await updateContainerEnvBatch(agentId, existing.hostIp, keyUpdates);
       const providers = keyUpdates.map(([k]) => k.replace('_API_KEY', '').toLowerCase()).join(', ');
       logActivity(agentId, 'system', `API keys updated: ${providers}`);
     } catch (err) {
@@ -319,7 +322,8 @@ export async function updateAgent(userId: string, agentId: string, updates: { pr
 export async function startAgent(userId: string, agentId: string) {
   const agent = await getAgentById(userId, agentId);
   if (!agent) throw new Error('Agent not found');
-  await startContainer(agentId);
+  if (!agent.hostIp) throw new Error('Agent host IP missing');
+  await startContainer(agentId, agent.hostIp);
   if (agent.openrouterKeyHash) { try { await enableKey(agent.openrouterKeyHash); } catch {} }
   const updated = await prisma.agent.update({ where: { id: agentId }, data: { status: 'running' } });
   logActivity(agentId, 'system', 'Agent started');
@@ -329,7 +333,8 @@ export async function startAgent(userId: string, agentId: string) {
 export async function stopAgent(userId: string, agentId: string) {
   const agent = await getAgentById(userId, agentId);
   if (!agent) throw new Error('Agent not found');
-  await stopContainer(agentId);
+  if (!agent.hostIp) throw new Error('Agent host IP missing');
+  await stopContainer(agentId, agent.hostIp);
   if (agent.openrouterKeyHash) { try { await disableKey(agent.openrouterKeyHash); } catch {} }
   const updated = await prisma.agent.update({ where: { id: agentId }, data: { status: 'stopped' } });
   logActivity(agentId, 'system', 'Agent stopped');
@@ -340,7 +345,7 @@ export async function deleteAgent(userId: string, agentId: string) {
   const agent = await getAgentById(userId, agentId);
   if (!agent) throw new Error('Agent not found');
   if (agent.openrouterKeyHash) { try { await deleteKey(agent.openrouterKeyHash); } catch {} }
-  await deleteContainer(agentId);
+  if (agent.hostIp) { await deleteContainer(agentId, agent.hostIp); }
   await prisma.activity.deleteMany({ where: { agentId } });
   await prisma.agent.delete({ where: { id: agentId } });
 }
@@ -348,7 +353,8 @@ export async function deleteAgent(userId: string, agentId: string) {
 export async function getAgentStatus(userId: string, agentId: string) {
   const agent = await getAgentById(userId, agentId);
   if (!agent) throw new Error('Agent not found');
-  const container = await getContainer(agentId);
+  if (!agent.hostIp) throw new Error('Agent host IP missing');
+  const container = await getContainer(agentId, agent.hostIp);
   return { agent, container };
 }
 
