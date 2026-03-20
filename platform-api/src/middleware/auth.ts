@@ -27,11 +27,11 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
           console.log('[auth] Privy user object:', JSON.stringify(privyUser, null, 2));
           
           // Get the first Solana wallet (Privy creates embedded Solana wallets)
-          const solanaWallet = privyUser.linkedAccounts?.find((acc: any) => 
-            acc.type === 'wallet' && acc.chainType === 'solana'
+          const solanaWallet = privyUser.linkedAccounts?.find((acc) => 
+            acc.type === 'wallet' && 'chainType' in acc && acc.chainType === 'solana'
           );
           
-          if (solanaWallet) {
+          if (solanaWallet && solanaWallet.type === 'wallet' && 'address' in solanaWallet) {
             walletAddress = solanaWallet.address;
             console.log('[auth] Found Solana wallet:', walletAddress);
           } else {
