@@ -35,7 +35,7 @@ MODEL="${SAID_MODEL:-anthropic/claude-sonnet-4-5}"
 echo "[said-hosting] Bootstrapping SAID identity..."
 export AGENT_DATA_DIR="$DATA_DIR"
 export SAID_IDENTITY_ENV_PATH="$IDENTITY_ENV"
-node /agent/scripts/bootstrap-identity.mjs || echo "[said-hosting] Bootstrap completed with warnings (non-fatal)"
+node /agent/scripts/bootstrap-identity.cjs || echo "[said-hosting] Bootstrap completed with warnings (non-fatal)"
 
 if [ -f "$IDENTITY_ENV" ]; then
   # shellcheck disable=SC1090
