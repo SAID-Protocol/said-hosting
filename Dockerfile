@@ -20,7 +20,10 @@ RUN cd /usr/local/lib/node_modules/openclaw/extensions/telegram && npm install 2
 # Create agent directories (workspace will be on mounted volume)
 RUN mkdir -p /agent/scripts /data
 
-# Install script-local dependencies too so ESM scripts resolve reliably in-container
+# Copy scripts first (before installing dependencies)
+COPY scripts/ /agent/scripts/
+
+# Install script-local dependencies so ESM scripts resolve reliably in-container
 WORKDIR /agent/scripts
 RUN npm init -y && npm install @solana/web3.js @solana/spl-token tweetnacl bs58
 
@@ -30,7 +33,6 @@ RUN npm init -y && npm install @solana/web3.js @solana/spl-token tweetnacl bs58
 # Copy SAID base config and skills
 COPY config/ /agent/config/
 COPY skills/ /agent/skills/
-COPY scripts/ /agent/scripts/
 
 # Install skill dependencies
 RUN cd /agent/skills/said-a2a && npm install --omit=dev 2>/dev/null || true
