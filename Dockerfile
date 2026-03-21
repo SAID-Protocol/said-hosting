@@ -57,6 +57,9 @@ RUN fallocate -l 1G /agent/swapfile && chmod 600 /agent/swapfile && mkswap /agen
 # Cap V8 heap to leave room for OS + extensions
 ENV NODE_OPTIONS="--max-old-space-size=1536"
 
+# Enable Node.js to find globally installed modules (required for ESM imports in bootstrap script)
+ENV NODE_PATH="/usr/local/lib/node_modules"
+
 # Run as non-root
 RUN useradd -m -s /bin/bash agent
 RUN chown -R agent:agent /agent /data
