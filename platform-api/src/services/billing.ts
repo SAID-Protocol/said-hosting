@@ -94,6 +94,22 @@ export async function getWalletUsdcBalance(walletAddress: string): Promise<numbe
 }
 
 /**
+ * Get SOL balance for a wallet address
+ */
+export async function getWalletSolBalance(walletAddress: string): Promise<number> {
+  try {
+    const connection = new Connection(RPC_URL);
+    const wallet = new PublicKey(walletAddress);
+    const balance = await connection.getBalance(wallet);
+    // Convert lamports to SOL (1 SOL = 1,000,000,000 lamports)
+    return balance / 1_000_000_000;
+  } catch (error) {
+    console.error('Failed to get SOL balance:', error);
+    return 0;
+  }
+}
+
+/**
  * Build a USDC transfer transaction (to be signed by Privy signer)
  */
 export async function buildBillingTransaction(
@@ -430,8 +446,10 @@ export async function getBillingInfo(userId: string) {
   if (!user) return null;
   
   let walletBalance = 0;
+  let solBalance = 0;
   if (user.privyWalletAddress) {
     walletBalance = await getWalletUsdcBalance(user.privyWalletAddress);
+    solBalance = await getWalletSolBalance(user.privyWalletAddress);
   }
   
   // Get recent payments
@@ -468,6 +486,7 @@ export async function getBillingInfo(userId: string) {
   return {
     ...user,
     walletBalance,
+    solBalance,
     recentPayments,
     paymentDue,
     inGracePeriod,
