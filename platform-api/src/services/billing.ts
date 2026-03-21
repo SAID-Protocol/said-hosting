@@ -580,7 +580,7 @@ export async function processManualPayment(userId: string, txSignature: string):
     data: {
       nextBillingDate: nextBilling,
       lastPaymentAt: new Date(),
-      billingStatus: user.billingStatus === 'paused' ? 'active' : user.billingStatus,
+      billingStatus: 'active', // Always activate after successful payment
     },
   });
   
