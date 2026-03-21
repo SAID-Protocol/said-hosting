@@ -8,7 +8,7 @@ const RPC_URL = process.env.SOLANA_RPC || 'https://newest-restless-mansion.solan
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 
 /**
- * GET /api/balance/:walletAddress - Get USDC balance for any Solana wallet
+ * GET /api/balance/:walletAddress - Get USDC and SOL balance for any Solana wallet
  * No auth required - simple RPC proxy to avoid exposing QuickNode URL
  */
 balanceRouter.get('/:walletAddress', async (req, res) => {
@@ -25,18 +25,32 @@ balanceRouter.get('/:walletAddress', async (req, res) => {
     }
     
     const connection = new Connection(RPC_URL);
-    const ata = await getAssociatedTokenAddress(USDC_MINT, wallet);
     
+    // Get USDC balance
+    let usdcBalance = 0;
     try {
-      const balance = await connection.getTokenAccountBalance(ata);
-      res.json({ 
-        balance: Number(balance.value.uiAmount || 0),
-        walletAddress,
-      });
+      const ata = await getAssociatedTokenAddress(USDC_MINT, wallet);
+      const tokenBalance = await connection.getTokenAccountBalance(ata);
+      usdcBalance = Number(tokenBalance.value.uiAmount || 0);
     } catch {
-      // Token account doesn't exist = 0 balance
-      res.json({ balance: 0, walletAddress });
+      // Token account doesn't exist = 0 USDC
+      usdcBalance = 0;
     }
+    
+    // Get SOL balance
+    let solBalance = 0;
+    try {
+      const lamports = await connection.getBalance(wallet);
+      solBalance = lamports / 1_000_000_000; // Convert lamports to SOL
+    } catch {
+      solBalance = 0;
+    }
+    
+    res.json({ 
+      balance: usdcBalance,
+      solBalance: solBalance,
+      walletAddress,
+    });
   } catch (error) {
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Failed to fetch balance' 
