@@ -538,6 +538,69 @@ export async function buildWithdrawalTransaction(
 }
 
 /**
+ * Rotate API keys for all user's agents (fresh monthly credits)
+ * Called after successful subscription payment
+ */
+async function rotateAgentKeys(userId: string, tier: string): Promise<void> {
+  const { createAgentKey, deleteKey } = await import('./openrouter');
+  const { updateContainerEnv } = await import('./hetzner-multi');
+  
+  // Get all user's running agents
+  const agents = await prisma.agent.findMany({
+    where: { 
+      userId,
+      status: 'running'
+    },
+    select: {
+      id: true,
+      name: true,
+      tier: true,
+      openrouterKeyHash: true,
+      hostIp: true,
+    },
+  });
+  
+  console.log(`[billing] Rotating keys for ${agents.length} agents (tier: ${tier})`);
+  
+  for (const agent of agents) {
+    try {
+      // Create new key with tier-based monthly limit
+      const newKey = await createAgentKey(agent.id, agent.name, tier);
+      
+      // Delete old key if exists
+      if (agent.openrouterKeyHash) {
+        await deleteKey(agent.openrouterKeyHash).catch((err) => {
+          console.warn(`[billing] Failed to delete old key for ${agent.id}:`, err);
+        });
+      }
+      
+      // Update database with new tier and key
+      await prisma.agent.update({
+        where: { id: agent.id },
+        data: { 
+          tier,
+          openrouterKeyHash: newKey.hash,
+        },
+      });
+      
+      // Inject new key into container (auto-restarts)
+      if (agent.hostIp) {
+        await updateContainerEnv(
+          agent.id,
+          agent.hostIp,
+          'OPENROUTER_API_KEY',
+          newKey.key
+        );
+        console.log(`[billing] Rotated key for agent ${agent.name} (${agent.id.slice(0, 8)})`);
+      }
+    } catch (error) {
+      console.error(`[billing] Failed to rotate key for agent ${agent.id}:`, error);
+      // Continue with other agents even if one fails
+    }
+  }
+}
+
+/**
  * Process manual payment (user-initiated)
  * Called after user approves payment via Privy
  */
@@ -583,6 +646,10 @@ export async function processManualPayment(userId: string, txSignature: string):
       billingStatus: 'active', // Always activate after successful payment
     },
   });
+  
+  // Rotate API keys for all agents (fresh monthly credits)
+  const tier = user.tier || 'starter';
+  await rotateAgentKeys(userId, tier);
   
   console.log(`[billing] Manual payment processed for user ${userId}: ${txSignature}`);
 }
