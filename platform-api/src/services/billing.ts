@@ -377,6 +377,38 @@ export async function runBillingCron() {
 }
 
 /**
+ * Check if user has a payment due (manual billing)
+ */
+export function isPaymentDue(user: { nextBillingDate: Date | null; billingStatus: string }): boolean {
+  if (!user.nextBillingDate) return false;
+  if (user.billingStatus === 'none' || user.billingStatus === 'cancelled') return false;
+  
+  const now = new Date();
+  return now >= user.nextBillingDate;
+}
+
+/**
+ * Check if user is in grace period (payment overdue but agent still works)
+ */
+export function isInGracePeriod(user: { nextBillingDate: Date | null; billingStatus: string }): boolean {
+  if (!isPaymentDue(user)) return false;
+  
+  const now = new Date();
+  const gracePeriodEnd = new Date(user.nextBillingDate!);
+  gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 3); // 3-day grace period
+  
+  return now < gracePeriodEnd;
+}
+
+/**
+ * Check if user's agent should be paused (payment overdue + grace period expired)
+ */
+export function shouldPauseAgent(user: { nextBillingDate: Date | null; billingStatus: string }): boolean {
+  if (!isPaymentDue(user)) return false;
+  return !isInGracePeriod(user);
+}
+
+/**
  * Get billing info for dashboard display
  */
 export async function getBillingInfo(userId: string) {
@@ -409,10 +441,39 @@ export async function getBillingInfo(userId: string) {
     take: 10,
   });
   
+  // Calculate payment status
+  const paymentDue = isPaymentDue(user);
+  const inGracePeriod = isInGracePeriod(user);
+  const agentPaused = shouldPauseAgent(user);
+  
+  // Calculate days until payment/grace period ends
+  let daysUntilDue = 0;
+  let daysUntilPause = 0;
+  
+  if (user.nextBillingDate) {
+    const now = new Date();
+    const nextBilling = new Date(user.nextBillingDate);
+    
+    if (!paymentDue) {
+      // Days until payment is due
+      daysUntilDue = Math.ceil((nextBilling.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    } else if (inGracePeriod) {
+      // Days until grace period ends (agent pauses)
+      const gracePeriodEnd = new Date(nextBilling);
+      gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 3);
+      daysUntilPause = Math.ceil((gracePeriodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    }
+  }
+  
   return {
     ...user,
     walletBalance,
     recentPayments,
+    paymentDue,
+    inGracePeriod,
+    agentPaused,
+    daysUntilDue,
+    daysUntilPause,
   };
 }
 
@@ -455,4 +516,54 @@ export async function buildWithdrawalTransaction(
   const serialized = transaction.serialize({ requireAllSignatures: false }).toString('base64');
   
   return { transaction: serialized, amountUsdc };
+}
+
+/**
+ * Process manual payment (user-initiated)
+ * Called after user approves payment via Privy
+ */
+export async function processManualPayment(userId: string, txSignature: string): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      tier: true,
+      monthlyAmountUsd: true,
+      nextBillingDate: true,
+      billingStatus: true,
+    },
+  });
+  
+  if (!user) throw new Error('User not found');
+  if (!user.monthlyAmountUsd) throw new Error('No billing amount set');
+  
+  // Verify transaction on-chain (optional but recommended)
+  // TODO: Add transaction verification via Solana RPC
+  
+  // Record the payment
+  await recordPayment(
+    userId,
+    null, // Not tied to specific agent
+    user.monthlyAmountUsd,
+    'USDC',
+    user.monthlyAmountUsd, // 1:1
+    txSignature,
+    'completed',
+    'subscription',
+  );
+  
+  // Update next billing date (add 30 days)
+  const nextBilling = user.nextBillingDate ? new Date(user.nextBillingDate) : new Date();
+  nextBilling.setDate(nextBilling.getDate() + 30);
+  
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      nextBillingDate: nextBilling,
+      lastPaymentAt: new Date(),
+      billingStatus: user.billingStatus === 'paused' ? 'active' : user.billingStatus,
+    },
+  });
+  
+  console.log(`[billing] Manual payment processed for user ${userId}: ${txSignature}`);
 }

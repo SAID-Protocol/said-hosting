@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getBillingInfo, getMonthlyPrice, getWalletUsdcBalance, startTrial, PRICING, buildWithdrawalTransaction, recordPayment } from '../services/billing';
+import { getBillingInfo, getMonthlyPrice, getWalletUsdcBalance, startTrial, PRICING, buildWithdrawalTransaction, recordPayment, processManualPayment } from '../services/billing';
 import { prisma } from '../db';
 
 export const billingRouter = Router();
@@ -273,5 +273,33 @@ billingRouter.post('/withdraw', async (req, res) => {
   } catch (error) {
     console.error('[billing/withdraw] Error:', error);
     res.status(500).json({ error: error instanceof Error ? error.message : 'Withdrawal failed' });
+  }
+});
+
+/**
+ * POST /api/billing/pay — Process manual subscription payment
+ * User initiates payment via Privy, sends tx signature to confirm
+ */
+billingRouter.post('/pay', async (req, res) => {
+  try {
+    const userId = (req as typeof req & { userId: string }).userId;
+    const { txSignature } = req.body;
+    
+    if (!txSignature || typeof txSignature !== 'string') {
+      res.status(400).json({ error: 'txSignature is required' });
+      return;
+    }
+    
+    // Process the payment and update billing status
+    await processManualPayment(userId, txSignature);
+    
+    res.json({
+      success: true,
+      message: 'Payment processed successfully',
+      txSignature,
+    });
+  } catch (error) {
+    console.error('[billing/pay] Error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Payment processing failed' });
   }
 });
