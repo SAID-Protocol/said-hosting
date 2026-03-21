@@ -415,3 +415,44 @@ export async function getBillingInfo(userId: string) {
     recentPayments,
   };
 }
+
+/**
+ * Build a USDC withdrawal transaction (user → external address)
+ * Uses server-side signer to transfer from user's Privy wallet
+ */
+export async function buildWithdrawalTransaction(
+  fromWallet: string,
+  toWallet: string,
+  amountUsd: number,
+): Promise<{ transaction: string; amountUsdc: number }> {
+  const connection = new Connection(RPC_URL);
+  const from = new PublicKey(fromWallet);
+  const to = new PublicKey(toWallet);
+  
+  // USDC amount = USD amount (1:1 stablecoin)
+  const amountUsdc = amountUsd;
+  const amountLamports = Math.round(amountUsdc * 1_000_000); // 6 decimals
+  
+  const fromAta = await getAssociatedTokenAddress(USDC_MINT, from);
+  const toAta = await getAssociatedTokenAddress(USDC_MINT, to);
+  
+  const transaction = new Transaction().add(
+    createTransferInstruction(
+      fromAta,
+      toAta,
+      from,
+      amountLamports,
+      [],
+      TOKEN_PROGRAM_ID,
+    )
+  );
+  
+  const { blockhash } = await connection.getLatestBlockhash();
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = from;
+  
+  // Serialize for Privy to sign
+  const serialized = transaction.serialize({ requireAllSignatures: false }).toString('base64');
+  
+  return { transaction: serialized, amountUsdc };
+}

@@ -52,7 +52,7 @@ export async function getUserWalletId(privyDid: string): Promise<{ walletId: str
 }
 
 /**
- * Build a USDC transfer transaction
+ * Build a USDC transfer transaction (to treasury)
  */
 async function buildUsdcTransferTx(
   fromAddress: string,
@@ -148,6 +148,105 @@ export async function signAndSubmitBillingTx(
     return txSignature;
   } catch (error) {
     console.error(`[privy-billing] Error:`, error);
+    return null;
+  }
+}
+
+/**
+ * Build a USDC withdrawal transaction (to external address)
+ */
+async function buildWithdrawalTx(
+  fromAddress: string,
+  toAddress: string,
+  amountUsd: number,
+): Promise<string> {
+  const connection = new Connection(RPC_URL);
+  const from = new PublicKey(fromAddress);
+  const to = new PublicKey(toAddress);
+  
+  const amountLamports = Math.round(amountUsd * 1_000_000); // USDC has 6 decimals
+  
+  const fromAta = await getAssociatedTokenAddress(USDC_MINT, from);
+  const toAta = await getAssociatedTokenAddress(USDC_MINT, to);
+  
+  const transaction = new Transaction().add(
+    createTransferInstruction(
+      fromAta,
+      toAta,
+      from,
+      amountLamports,
+      [],
+      TOKEN_PROGRAM_ID,
+    )
+  );
+  
+  const { blockhash } = await connection.getLatestBlockhash();
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = from;
+  
+  // Serialize as base64 for Privy
+  return transaction.serialize({ requireAllSignatures: false }).toString('base64');
+}
+
+/**
+ * Sign and submit a withdrawal transaction via Privy
+ * User can withdraw USDC from their embedded wallet to an external address
+ */
+export async function signAndSubmitWithdrawalTx(
+  privyDid: string,
+  toAddress: string,
+  amountUsd: number,
+): Promise<string | null> {
+  try {
+    // 1. Get user's wallet
+    const wallet = await getUserWalletId(privyDid);
+    if (!wallet) {
+      console.error(`[privy-billing] No wallet found for ${privyDid}`);
+      return null;
+    }
+    
+    // 2. Build the withdrawal transaction
+    const serializedTx = await buildWithdrawalTx(wallet.address, toAddress, amountUsd);
+    
+    // 3. Sign and send via Privy API
+    const response = await fetch(`https://api.privy.io/v1/intents/wallets/${wallet.walletId}/rpc`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'privy-app-id': PRIVY_APP_ID,
+        'Authorization': `Basic ${Buffer.from(`${PRIVY_APP_ID}:${PRIVY_APP_SECRET}`).toString('base64')}`,
+      },
+      body: JSON.stringify({
+        method: 'signAndSendTransaction',
+        params: {
+          transaction: serializedTx,
+          encoding: 'base64',
+        },
+      }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`[privy-billing] Withdrawal RPC failed (${response.status}):`, error);
+      return null;
+    }
+    
+    const result = await response.json();
+    
+    if (result.status === 'pending_authorization') {
+      console.log(`[privy-billing] Withdrawal intent ${result.intent_id} pending authorization`);
+      return null;
+    }
+    
+    const txSignature = result.response?.signature || result.response?.result || null;
+    
+    if (txSignature) {
+      console.log(`[privy-billing] Withdrawal tx submitted: ${txSignature}`);
+    }
+    
+    return txSignature;
+  } catch (error) {
+    console.error(`[privy-billing] Withdrawal error:`, error);
     return null;
   }
 }

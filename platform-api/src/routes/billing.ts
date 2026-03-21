@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getBillingInfo, getMonthlyPrice, getWalletUsdcBalance, startTrial, PRICING } from '../services/billing';
+import { getBillingInfo, getMonthlyPrice, getWalletUsdcBalance, startTrial, PRICING, buildWithdrawalTransaction, recordPayment } from '../services/billing';
 import { prisma } from '../db';
 
 export const billingRouter = Router();
@@ -188,5 +188,90 @@ billingRouter.get('/payments', async (req, res) => {
     res.json(payments);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch payments' });
+  }
+});
+
+/**
+ * POST /api/billing/withdraw — Withdraw USDC from embedded wallet to external address
+ */
+billingRouter.post('/withdraw', async (req, res) => {
+  try {
+    const userId = (req as typeof req & { userId: string }).userId;
+    const { toAddress, amount } = req.body;
+    
+    // Validate inputs
+    if (!toAddress || typeof toAddress !== 'string') {
+      res.status(400).json({ error: 'toAddress is required' });
+      return;
+    }
+    
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
+      res.status(400).json({ error: 'amount must be a positive number' });
+      return;
+    }
+    
+    // Minimum withdrawal $1 (prevent spam)
+    if (amount < 1) {
+      res.status(400).json({ error: 'Minimum withdrawal is $1 USDC' });
+      return;
+    }
+    
+    // Get user
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { privyId: true, privyWalletAddress: true },
+    });
+    
+    if (!user?.privyId || !user?.privyWalletAddress) {
+      res.status(400).json({ error: 'User wallet not found' });
+      return;
+    }
+    
+    // Check balance
+    const balance = await getWalletUsdcBalance(user.privyWalletAddress);
+    if (balance < amount) {
+      res.status(400).json({ error: `Insufficient balance. You have $${balance.toFixed(2)} USDC.` });
+      return;
+    }
+    
+    // Validate Solana address
+    try {
+      // This will throw if invalid
+      new (await import('@solana/web3.js')).PublicKey(toAddress);
+    } catch {
+      res.status(400).json({ error: 'Invalid Solana address' });
+      return;
+    }
+    
+    // Execute withdrawal via Privy server-side signer
+    const { signAndSubmitWithdrawalTx } = await import('../services/privy-billing');
+    const txSignature = await signAndSubmitWithdrawalTx(user.privyId, toAddress, amount);
+    
+    if (!txSignature) {
+      res.status(500).json({ error: 'Withdrawal transaction failed. Please try again.' });
+      return;
+    }
+    
+    // Record withdrawal
+    await recordPayment(
+      userId,
+      null, // Not tied to a specific agent
+      amount,
+      'USDC',
+      amount, // 1:1
+      txSignature,
+      'completed',
+      'withdrawal',
+    );
+    
+    res.json({
+      success: true,
+      txSignature,
+      amount,
+      toAddress,
+    });
+  } catch (error) {
+    console.error('[billing/withdraw] Error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Withdrawal failed' });
   }
 });
