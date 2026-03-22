@@ -181,31 +181,34 @@ export async function registerAgentMetaplex(metadata: AgentMetadata): Promise<Me
       uri: registrationUri,
     };
 
-    // Add collection if configured
+    // Fetch collection if configured — needed for both create and register
+    let collection: Awaited<ReturnType<typeof fetchCollection>> | undefined;
     if (AGENT_COLLECTION_ADDRESS) {
       try {
-        const collection = await fetchCollection(umi, umiPublicKey(AGENT_COLLECTION_ADDRESS));
-        (createParams as Record<string, unknown>).collection = umiPublicKey(AGENT_COLLECTION_ADDRESS);
+        collection = await fetchCollection(umi, umiPublicKey(AGENT_COLLECTION_ADDRESS));
+        console.log(`[metaplex] Creating asset in collection: ${AGENT_COLLECTION_ADDRESS}`);
       } catch (e) {
         console.warn('[metaplex] Collection not found, creating without collection:', e);
       }
     }
 
-    await createAsset(umi, createParams).sendAndConfirm(umi);
+    // Create the asset — pass full collection object so asset belongs to it
+    await createAsset(umi, {
+      asset,
+      name: metadata.name,
+      uri: registrationUri,
+      ...(collection ? { collection } : {}),
+    }).sendAndConfirm(umi);
 
     console.log(`[metaplex] Created MPL Core asset: ${asset.publicKey}`);
 
     // Register identity on Metaplex Agent Registry
-    const registerParams: Parameters<typeof registerIdentityV1>[1] = {
+    // Pass collection publicKey for the authority check
+    const registerResult = await registerIdentityV1(umi, {
       asset: asset.publicKey,
+      ...(collection ? { collection: collection.publicKey } : {}),
       agentRegistrationUri: registrationUri,
-    };
-
-    if (AGENT_COLLECTION_ADDRESS) {
-      (registerParams as Record<string, unknown>).collection = umiPublicKey(AGENT_COLLECTION_ADDRESS);
-    }
-
-    const registerResult = await registerIdentityV1(umi, registerParams).sendAndConfirm(umi);
+    }).sendAndConfirm(umi);
 
     console.log(`[metaplex] Registered agent identity for ${metadata.name} (asset: ${asset.publicKey})`);
 
