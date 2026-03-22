@@ -111,20 +111,42 @@ async function getHostCapacity(): Promise<Map<string, number>> {
 /**
  * Select the least-loaded host for new agent
  */
-async function selectHost(): Promise<string> {
+// Server RAM in MB — used for tier-aware routing
+const HOST_RAM: Record<string, number> = {
+  '87.99.140.184': 30000,    // 30 GB, 8 cores
+  '5.78.185.103': 7600,      // 7.6 GB, 4 cores (free/starter only)
+  '5.78.186.196': 30000,     // 30 GB, 16 cores
+  '204.168.183.164': 30000,  // 30 GB, 16 cores
+};
+
+async function selectHost(tier?: string): Promise<string> {
   const capacity = await getHostCapacity();
+  const tierMemory = tier ? (TIER_CONFIGS[tier]?.memory || 768) : 768;
+  
+  // Filter hosts that can handle this tier (need at least 4GB free after this agent)
+  const eligibleHosts = HETZNER_HOSTS.filter(host => {
+    const hostRam = HOST_RAM[host] || 8000;
+    const agentCount = capacity.get(host) || 0;
+    const estimatedUsed = agentCount * 500 + 2000; // ~500MB avg per agent + 2GB system
+    const remainingAfter = hostRam - estimatedUsed - tierMemory;
+    return remainingAfter > 2000; // Keep 2GB buffer
+  });
+  
+  // If no eligible hosts, fall back to least-loaded
+  const candidates = eligibleHosts.length > 0 ? eligibleHosts : HETZNER_HOSTS;
   
   let minLoad = Infinity;
-  let selectedHost = HETZNER_HOSTS[0];
+  let selectedHost = candidates[0];
   
-  for (const [host, count] of capacity.entries()) {
+  for (const host of candidates) {
+    const count = capacity.get(host) || 0;
     if (count < minLoad) {
       minLoad = count;
       selectedHost = host;
     }
   }
   
-  console.log(`[hetzner] Selected host ${selectedHost} (load: ${minLoad} agents)`);
+  console.log(`[hetzner] Selected host ${selectedHost} (load: ${minLoad} agents, tier: ${tier || 'unknown'})`);
   return selectedHost;
 }
 
@@ -143,12 +165,12 @@ export async function createContainer(params: {
   gatewayToken: string;
   workspaceFiles?: string;
 }): Promise<ContainerInfo> {
-  const hostIp = await selectHost();
+  const hostIp = await selectHost(params.tier);
   const tierConfig = TIER_CONFIGS[params.tier];
   const containerName = `said-agent-${params.agentId.replace(/-/g, '').slice(0, 12)}`;
   const port = await findNextPort(hostIp);
   
-  const memoryMb = Math.min(tierConfig.memory, 2048);
+  const memoryMb = tierConfig.memory;
   
   const envVars = [
     `SAID_AGENT_TIER=${params.tier}`,
