@@ -142,7 +142,7 @@ async function registerHostedIdentity(keypair) {
       result.registered = true;
       result.saidPda = confirmRes.saidPda || confirmRes.agent?.saidPda || null;
       result.registrationSignature = confirmRes.signature || null;
-      result.funding = confirmRes.funding = null;
+      result.funding = confirmRes.funding || null;
 
       writeStatus(result);
       log(`SAID hosted registration complete${result.saidPda ? `: ${result.saidPda}` : ''}`);
