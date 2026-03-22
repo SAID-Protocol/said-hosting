@@ -81,6 +81,10 @@ agentRouter.post('/', async (req, res) => {
     const agent = await createAgent(userId, payload);
     res.status(201).json(agent);
   } catch (error) {
+    console.error('[createAgent] FAILED:', error instanceof Error ? error.message : error);
+    if (error instanceof Error && error.stack) {
+      console.error('[createAgent] Stack trace:', error.stack);
+    }
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to create agent' });
   }
 });
