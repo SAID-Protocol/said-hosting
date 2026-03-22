@@ -107,8 +107,8 @@ export async function createContainer(params: {
   const containerName = `said-agent-${params.agentId.replace(/-/g, '').slice(0, 12)}`;
   const port = await findNextPort();
   
-  // Memory limit: use tier config but cap at 2GB per container (host has 32GB)
-  const memoryMb = Math.min(tierConfig.memory, 2048);
+  // Memory limit: flat 2GB per container regardless of tier
+  const memoryMb = tierConfig.memory;
   
   // Escape env values for shell safety
   const envVars = [
