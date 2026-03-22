@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { Keypair, VersionedTransaction } = require('@solana/web3.js');
+const { Keypair, PublicKey, VersionedTransaction } = require('@solana/web3.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -143,6 +143,17 @@ async function registerHostedIdentity(keypair) {
       result.saidPda = confirmRes.saidPda || confirmRes.agent?.saidPda || null;
       result.registrationSignature = confirmRes.signature || null;
       result.funding = confirmRes.funding || null;
+
+      // Derive PDA locally if API didn't return it
+      if (!result.saidPda) {
+        const SAID_PROGRAM_ID = new PublicKey('5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G');
+        const [pda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('agent'), keypair.publicKey.toBuffer()],
+          SAID_PROGRAM_ID
+        );
+        result.saidPda = pda.toString();
+        log(`PDA derived locally: ${result.saidPda}`);
+      }
 
       writeStatus(result);
       log(`SAID hosted registration complete${result.saidPda ? `: ${result.saidPda}` : ''}`);
