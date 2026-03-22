@@ -28,8 +28,8 @@ const RPC_URL = process.env.SOLANA_RPC_URL || 'https://newest-restless-mansion.s
 export const PRICING = {
   all_inclusive: {
     starter: 29,
-    pro: 99,
-    power: 249,
+    pro: 79,
+    power: 199,
   },
   byok: {
     starter: 14,
