@@ -187,6 +187,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
       gatewayToken,
     });
     containerId = container.id;
+    console.log('[createAgent] Container deployed:', container.id, 'on', container.hostIp, '- now creating DB record...');
 
     const agent = await prisma.agent.create({
       data: {
@@ -212,6 +213,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         },
       },
     });
+    console.log('[createAgent] ✅ Database record created for agent:', agentId);
     logActivity(agentId, 'system', `Agent created on Hetzner (port ${container.port})${payload.custom_api_key ? ' with custom API key' : ' with managed OpenRouter key'}`);
     
     // Return agent with plaintext gateway token (only time it's exposed)
