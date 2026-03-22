@@ -174,29 +174,12 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
       console.log('[createAgent] Using managed OpenRouter key');
     }
 
-    const container = await createContainer({
-      agentId,
-      tier,
-      agentName: payload.name.trim(),
-      agentDescription: payload.description || `Hosted SAID agent: ${payload.name.trim()}`,
-      programMd: payload.program_md,
-      config: payload.config ? JSON.stringify(payload.config) : undefined,
-      workspaceFiles: JSON.stringify(workspace.files),
-      openRouterKey: apiKey,
-      telegramToken: payload.telegram_token,
-      gatewayToken,
-    });
-    containerId = container.id;
-    console.log('[createAgent] Container deployed:', container.id, 'on', container.hostIp, '- now creating DB record...');
-
+    // Create DB record FIRST so bootstrap can find it when container starts
     const agent = await prisma.agent.create({
       data: {
         id: agentId,
         name: payload.name.trim(),
-        flyMachineId: container.id,       // reuse field for container ID
-        flyAppName: `hetzner:${container.port}`,  // store host:port for routing
-        hostIp: container.hostIp,
-        status: 'running',
+        status: 'creating',
         tier,
         programMd: payload.program_md ?? null,
         config: payload.config ? JSON.stringify(payload.config) : null,
@@ -214,15 +197,42 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
       },
     });
     console.log('[createAgent] ✅ Database record created for agent:', agentId);
+
+    // Now deploy the container — bootstrap will call /register-said which needs the DB record
+    const container = await createContainer({
+      agentId,
+      tier,
+      agentName: payload.name.trim(),
+      agentDescription: payload.description || `Hosted SAID agent: ${payload.name.trim()}`,
+      programMd: payload.program_md,
+      config: payload.config ? JSON.stringify(payload.config) : undefined,
+      workspaceFiles: JSON.stringify(workspace.files),
+      openRouterKey: apiKey,
+      telegramToken: payload.telegram_token,
+      gatewayToken,
+    });
+    containerId = container.id;
+    console.log('[createAgent] Container deployed:', container.id, 'on', container.hostIp);
+
+    // Update DB record with container info
+    const updatedAgent = await prisma.agent.update({
+      where: { id: agentId },
+      data: {
+        flyMachineId: container.id,
+        flyAppName: `hetzner:${container.port}`,
+        hostIp: container.hostIp,
+        status: 'running',
+      },
+    });
+
     logActivity(agentId, 'system', `Agent created on Hetzner (port ${container.port})${payload.custom_api_key ? ' with custom API key' : ' with managed OpenRouter key'}`);
     
     // Return agent with plaintext gateway token (only time it's exposed)
-    return { ...agent, gatewayToken };
+    return { ...updatedAgent, gatewayToken };
   } catch (error) {
     if (orKeyHash) { try { await deleteKey(orKeyHash); } catch {} }
-    // Note: If container was created, we'd have container.hostIp, but error might occur before that
-    // In that case, we can't clean up the container without knowing which host it's on
-    // This is acceptable since container creation failing means nothing was actually created
+    // Clean up orphaned DB record if container creation failed
+    try { await prisma.agent.delete({ where: { id: agentId } }); } catch {}
     throw error;
   }
 }
