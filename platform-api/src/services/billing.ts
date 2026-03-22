@@ -647,9 +647,8 @@ export async function processManualPayment(userId: string, txSignature: string):
     },
   });
   
-  // Rotate API keys for all agents (fresh monthly credits)
-  const tier = user.tier || 'starter';
-  await rotateAgentKeys(userId, tier);
+  // Key rotation happens on the monthly billing cron per-agent, not on payment
+  // This prevents rotating all agent keys every time a user pays for a new agent
   
   console.log(`[billing] Manual payment processed for user ${userId}: ${txSignature}`);
 }
