@@ -202,15 +202,21 @@ export async function registerAgentMetaplex(metadata: AgentMetadata): Promise<Me
 
     console.log(`[metaplex] Created MPL Core asset: ${asset.publicKey}`);
 
-    // Small delay to ensure the asset is visible on-chain before registering
-    await new Promise(r => setTimeout(r, 2000));
-
-    // Verify asset exists before attempting registration
-    const assetCheck = await umi.rpc.getAccount(asset.publicKey);
-    if (!assetCheck.exists) {
-      throw new Error(`Asset ${asset.publicKey} not found on-chain after creation`);
+    // Poll for asset to be visible on-chain (up to 30s)
+    let assetConfirmed = false;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const assetCheck = await umi.rpc.getAccount(asset.publicKey);
+      if (assetCheck.exists) {
+        assetConfirmed = true;
+        console.log(`[metaplex] Asset confirmed on-chain (attempt ${attempt + 1})`);
+        break;
+      }
+      console.log(`[metaplex] Asset not visible yet (attempt ${attempt + 1}/10)...`);
     }
-    console.log(`[metaplex] Asset confirmed on-chain, registering identity...`);
+    if (!assetConfirmed) {
+      throw new Error(`Asset ${asset.publicKey} not found on-chain after 30s`);
+    }
 
     // Register identity on Metaplex Agent Registry
     // Pass collection publicKey for the authority check
