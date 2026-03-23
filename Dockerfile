@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw + Solana bootstrap dependencies globally
-RUN npm install -g openclaw@2026.3.12 @solana/web3.js @solana/spl-token tweetnacl bs58
+RUN npm install -g openclaw@2026.3.22 @solana/web3.js @solana/spl-token tweetnacl bs58
 
 # Install Prisma CLI globally for database migrations
 RUN npm install -g prisma
