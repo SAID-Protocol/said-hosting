@@ -190,6 +190,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         programMd: payload.program_md ?? null,
         config: payload.config ? JSON.stringify(payload.config) : null,
         gatewayTokenHash,
+        gatewayToken,
         aiCreditsLimit: tierConfig.aiCredits,
         openrouterKeyHash: orKeyHash,
         fundingStatus: 'pending',
