@@ -66,6 +66,13 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   
   const existingAgents = user.agents.filter(a => a.status !== 'error');
   
+  // Hard cap on total agents across the platform
+  const MAX_AGENTS = 47;
+  const totalAgents = await prisma.agent.count({ where: { status: { not: 'error' } } });
+  if (totalAgents >= MAX_AGENTS) {
+    throw new Error('All hosting slots are currently full. Join the waitlist — more capacity coming soon.');
+  }
+  
   // Auto-start trial for first agent if user has no agents and no trial/subscription
   if (existingAgents.length === 0 && (user.billingStatus === 'none' || !user.billingStatus)) {
     // Check trial cap before starting a new trial
