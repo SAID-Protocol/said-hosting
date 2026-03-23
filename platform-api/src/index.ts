@@ -90,7 +90,7 @@ app.get('/api/stats', async (_req, res) => {
     const totalUsers = await prisma.user.count();
     const paidUsers = await prisma.user.count({ where: { billingStatus: { in: ['active', 'trial'] } } });
     const trialsUsed = await prisma.user.count({ where: { billingStatus: 'trial' } });
-    const trialsTotal = 50;
+    const trialsTotal = 40;
     const trialsRemaining = Math.max(0, trialsTotal - trialsUsed);
     res.json({ totalAgents, activeAgents, totalUsers, paidUsers, trialsUsed, trialsTotal, trialsRemaining });
   } catch (error) {

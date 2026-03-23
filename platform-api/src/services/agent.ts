@@ -68,6 +68,12 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   
   // Auto-start trial for first agent if user has no agents and no trial/subscription
   if (existingAgents.length === 0 && (user.billingStatus === 'none' || !user.billingStatus)) {
+    // Check trial cap before starting a new trial
+    const MAX_TRIALS = 40;
+    const trialsUsed = await prisma.user.count({ where: { billingStatus: 'trial' } });
+    if (trialsUsed >= MAX_TRIALS) {
+      throw new Error('Free trials are currently full. Please select a paid plan to get started.');
+    }
     console.log('[createAgent] Auto-starting trial for first agent');
     const { startTrial } = await import('./billing');
     await startTrial(userId, payload.tier || 'starter', 'all_inclusive');
