@@ -132,8 +132,11 @@ async function selectHost(tier?: string): Promise<string> {
     return remainingAfter > 2000; // Keep 2GB buffer
   });
   
-  // If no eligible hosts, fall back to least-loaded
-  const candidates = eligibleHosts.length > 0 ? eligibleHosts : HETZNER_HOSTS;
+  // If no eligible hosts, platform is full
+  if (eligibleHosts.length === 0) {
+    throw new Error('All hosting slots are currently full. Please try again later or contact support.');
+  }
+  const candidates = eligibleHosts;
   
   let minLoad = Infinity;
   let selectedHost = candidates[0];
