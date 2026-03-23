@@ -89,7 +89,10 @@ app.get('/api/stats', async (_req, res) => {
     const activeAgents = await prisma.agent.count({ where: { status: 'running' } });
     const totalUsers = await prisma.user.count();
     const paidUsers = await prisma.user.count({ where: { billingStatus: { in: ['active', 'trial'] } } });
-    res.json({ totalAgents, activeAgents, totalUsers, paidUsers });
+    const trialsUsed = await prisma.user.count({ where: { billingStatus: 'trial' } });
+    const trialsTotal = 50;
+    const trialsRemaining = Math.max(0, trialsTotal - trialsUsed);
+    res.json({ totalAgents, activeAgents, totalUsers, paidUsers, trialsUsed, trialsTotal, trialsRemaining });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
