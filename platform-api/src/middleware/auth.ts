@@ -1,8 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { PrivyClient } from '@privy-io/server-auth';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db';
 
 const privyClient = new PrivyClient(
   'cmlbxd3qu00jqi80c4pibohzv', // Privy App ID

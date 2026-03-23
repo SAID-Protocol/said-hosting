@@ -11,11 +11,9 @@
  * 4. Daily cron checks billing dates and deducts from wallet
  */
 
-import { PrismaClient } from '@prisma/client';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { getAssociatedTokenAddress, createTransferInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db';
 
 // USDC on Solana mainnet
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
