@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { initDb, prisma } from './db';
 import { agentRouter } from './routes/agents';
 import { billingRouter } from './routes/billing';
@@ -10,6 +11,31 @@ import { authMiddleware } from './middleware/auth';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
+
+// --- Rate limiting ---
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' },
+});
+
+const agentCreateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many agent creation requests, slow down' },
+});
+
+const billingLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many billing requests, slow down' },
+});
 
 const allowedOrigins = process.env.NODE_ENV === 'production'
   ? [
@@ -35,6 +61,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use(generalLimiter);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.3.0' });
@@ -68,8 +95,8 @@ app.get('/api/stats', async (_req, res) => {
   }
 });
 
-app.use('/api/agents', authMiddleware, agentRouter);
-app.use('/api/billing', authMiddleware, billingRouter);
+app.use('/api/agents', authMiddleware, agentCreateLimiter, agentRouter);
+app.use('/api/billing', authMiddleware, billingLimiter, billingRouter);
 app.use('/api/balance', balanceRouter); // Public endpoint - no auth needed
 
 async function start() {
