@@ -11,6 +11,7 @@ import { authMiddleware } from './middleware/auth';
 
 const app = express();
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3002;
 
 // --- Rate limiting ---
