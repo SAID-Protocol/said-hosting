@@ -82,6 +82,18 @@ app.post('/api/admin/run-billing', async (req, res) => {
   }
 });
 
+// Admin: list users by billing status
+app.get('/api/admin/users', async (req, res) => {
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey !== process.env.API_KEY) { res.status(404).json({ error: 'Not found' }); return; }
+  const status = req.query.status as string || 'trial';
+  const users = await prisma.user.findMany({
+    where: { billingStatus: status },
+    select: { id: true, email: true, tier: true, billingStatus: true, trialStartedAt: true, createdAt: true, agents: { select: { id: true, name: true, status: true, tier: true } } },
+  });
+  res.json({ count: users.length, users });
+});
+
 // Public stats endpoint
 app.get('/api/stats', async (_req, res) => {
   try {
