@@ -618,8 +618,47 @@ export async function processManualPayment(userId: string, txSignature: string):
   if (!user) throw new Error('User not found');
   if (!user.monthlyAmountUsd) throw new Error('No billing amount set');
   
-  // Verify transaction on-chain (optional but recommended)
-  // TODO: Add transaction verification via Solana RPC
+  // Verify transaction on-chain (API-S02)
+  const connection = new Connection(RPC_URL, 'confirmed');
+  const tx = await connection.getParsedTransaction(txSignature, { maxSupportedTransactionVersion: 0 });
+  
+  if (!tx) throw new Error('Transaction not found on-chain');
+  if (tx.meta?.err) throw new Error('Transaction failed on-chain');
+  
+  // Verify it's a USDC transfer to our treasury
+  const treasuryAta = await getAssociatedTokenAddress(USDC_MINT, TREASURY_WALLET);
+  const instructions = tx.transaction.message.instructions;
+  let verified = false;
+  
+  for (const ix of instructions) {
+    if ('parsed' in ix && ix.program === 'spl-token' && ix.parsed?.type === 'transfer') {
+      const info = ix.parsed.info;
+      if (
+        info.destination === treasuryAta.toString() &&
+        Number(info.amount) >= user.monthlyAmountUsd * 1_000_000 // USDC has 6 decimals
+      ) {
+        verified = true;
+        break;
+      }
+    }
+    // Also check transferChecked (used by some wallets)
+    if ('parsed' in ix && ix.program === 'spl-token' && ix.parsed?.type === 'transferChecked') {
+      const info = ix.parsed.info;
+      if (
+        info.destination === treasuryAta.toString() &&
+        Number(info.tokenAmount?.amount) >= user.monthlyAmountUsd * 1_000_000
+      ) {
+        verified = true;
+        break;
+      }
+    }
+  }
+  
+  if (!verified) throw new Error('Transaction does not contain valid USDC payment to treasury');
+  
+  // Check for duplicate payment (same tx signature already recorded)
+  const existing = await prisma.payment.findFirst({ where: { txSignature } });
+  if (existing) throw new Error('Payment already recorded');
   
   // Record the payment
   await recordPayment(
