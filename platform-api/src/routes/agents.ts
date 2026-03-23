@@ -115,13 +115,13 @@ agentRouter.patch('/:id', async (req, res) => {
   try {
     const userId = (req as typeof req & { userId: string }).userId;
     
-    // Block API key updates for free tier
+    // Block API key updates for free/trial tiers
     const hasKeyUpdate = req.body.anthropic_key || req.body.openai_key || req.body.openrouter_key;
     if (hasKeyUpdate) {
       const existing = await getAgentById(userId, req.params.id);
-      if (existing && existing.tier === 'free') {
+      if (existing && (existing.tier === 'free' || existing.tier === 'trial')) {
         return res.status(403).json({ 
-          error: 'API key customization requires a paid plan. Upgrade to Starter ($39/mo) or higher.' 
+          error: 'API key customization requires a paid plan. Upgrade to Starter ($29/mo) or higher.' 
         });
       }
     }
