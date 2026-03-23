@@ -20,7 +20,8 @@ const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 // Our treasury wallet that receives subscription payments
 const TREASURY_WALLET = new PublicKey(process.env.BILLING_TREASURY_WALLET || 'HUpEuDs3FC4T3xMZ3n8EGe16QLJFSnjbd1Kzh6C22YyP');
 
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://newest-restless-mansion.solana-mainnet.quiknode.pro/af7d979a4ef8558eb0da3166819eac8af0d3dd2b';
+if (!process.env.SOLANA_RPC_URL) throw new Error('SOLANA_RPC_URL environment variable is required');
+const RPC_URL: string = process.env.SOLANA_RPC_URL;
 
 // Pricing in USD (monthly)
 export const PRICING = {

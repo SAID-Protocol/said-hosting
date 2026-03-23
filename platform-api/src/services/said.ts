@@ -8,9 +8,8 @@ import bs58 from 'bs58';
 
 const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
 const SAID_PLATFORM_KEY = process.env.SAID_HOSTING_API_KEY || '';
-const SOLANA_RPC_URL =
-  process.env.SOLANA_RPC_URL ||
-  'https://newest-restless-mansion.solana-mainnet.quiknode.pro/af7d979a4ef8558eb0da3166819eac8af0d3dd2b';
+if (!process.env.SOLANA_RPC_URL) throw new Error('SOLANA_RPC_URL environment variable is required');
+const SOLANA_RPC_URL: string = process.env.SOLANA_RPC_URL;
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const USDC_DECIMALS = 6;
 const FUNDING_AMOUNTS: Record<string, number> = {

@@ -172,11 +172,16 @@ export async function createContainer(params: {
   
   const memoryMb = tierConfig.memory;
   
+  // Sanitize user-controlled values to prevent shell injection (API-S03)
+  const sanitizeName = (s: string) => s.replace(/[^a-zA-Z0-9 _\-\.]/g, '').slice(0, 64);
+  const safeName = sanitizeName(params.agentName || 'SAID Agent');
+  const safeDesc = sanitizeName(params.agentDescription || '');
+
   const envVars = [
     `SAID_AGENT_TIER=${params.tier}`,
     `SAID_AGENT_ID=${params.agentId}`,
-    `SAID_AGENT_NAME=${(params.agentName || 'SAID Agent').replace(/'/g, "\\'")}`,
-    `SAID_AGENT_DESCRIPTION=${(params.agentDescription || '').replace(/'/g, "\\'")}`,
+    `SAID_AGENT_NAME=${safeName}`,
+    `SAID_AGENT_DESCRIPTION=${safeDesc}`,
     `SAID_PLATFORM_API=https://app.saidprotocol.com`,
     `SAID_PLATFORM_API_KEY=${process.env.API_KEY || ''}`,
     `OPENCLAW_GATEWAY_TOKEN=${params.gatewayToken}`,
@@ -337,14 +342,16 @@ export async function listContainers(): Promise<ContainerInfo[]> {
  */
 export async function updateContainerEnv(agentId: string, hostIp: string, key: string, value: string): Promise<void> {
   const containerName = getContainerName(agentId);
-  const escapedValue = value.replace(/'/g, "'\\''");
+  // Base64 encode to prevent shell injection (API-S03)
+  const b64Payload = Buffer.from(JSON.stringify({ [key]: value })).toString('base64');
   await sshExec(hostIp, `docker exec ${containerName} node -e "
     const fs = require('fs');
+    const updates = JSON.parse(Buffer.from('${b64Payload}', 'base64').toString());
     const config = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));
     if (!config.env) config.env = {};
-    config.env['${key}'] = '${escapedValue}';
+    Object.assign(config.env, updates);
     fs.writeFileSync('/data/openclaw.json', JSON.stringify(config, null, 2));
-    console.log('Updated ${key}');
+    console.log('Updated ' + Object.keys(updates).join(', '));
   " && docker restart ${containerName}`);
 }
 
@@ -353,14 +360,17 @@ export async function updateContainerEnv(agentId: string, hostIp: string, key: s
  */
 export async function updateContainerEnvBatch(agentId: string, hostIp: string, entries: [string, string][]): Promise<void> {
   const containerName = getContainerName(agentId);
-  const assignments = entries.map(([k, v]) => `config.env['${k}'] = '${v.replace(/'/g, "'\\''")}';`).join('\n    ');
+  // Base64 encode to prevent shell injection (API-S03)
+  const updates = Object.fromEntries(entries);
+  const b64Payload = Buffer.from(JSON.stringify(updates)).toString('base64');
   await sshExec(hostIp, `docker exec ${containerName} node -e "
     const fs = require('fs');
+    const updates = JSON.parse(Buffer.from('${b64Payload}', 'base64').toString());
     const config = JSON.parse(fs.readFileSync('/data/openclaw.json', 'utf8'));
     if (!config.env) config.env = {};
-    ${assignments}
+    Object.assign(config.env, updates);
     fs.writeFileSync('/data/openclaw.json', JSON.stringify(config, null, 2));
-    console.log('Updated ${entries.length} keys');
+    console.log('Updated ' + Object.keys(updates).length + ' keys');
   " && docker restart ${containerName}`);
 }
 

@@ -4,7 +4,8 @@ import { getAssociatedTokenAddress } from '@solana/spl-token';
 
 export const balanceRouter = Router();
 
-const RPC_URL = process.env.SOLANA_RPC || 'https://newest-restless-mansion.solana-mainnet.quiknode.pro/af7d979a4ef8558eb0da3166819eac8af0d3dd2b';
+if (!process.env.SOLANA_RPC_URL && !process.env.SOLANA_RPC) throw new Error('SOLANA_RPC_URL environment variable is required');
+const RPC_URL: string = (process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC)!;
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 
 /**
