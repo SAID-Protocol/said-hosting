@@ -252,9 +252,10 @@ agentRouter.post('/:id/chat', async (req, res) => {
       return;
     }
 
-    // Add timeout to fetch (180 seconds — first message reads workspace files and can be slow)
+    // Power tier gets longer timeout (Opus responses can be slow)
+    const timeoutMs = (agent.tier === 'power' || agent.tier === 'pro') ? 300000 : 180000;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 180000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       // Route to Hetzner container or legacy Fly app
