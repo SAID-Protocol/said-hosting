@@ -67,7 +67,7 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   const existingAgents = user.agents.filter(a => a.status !== 'error');
   
   // Hard cap on total HOSTED agents (with containers on Hetzner, not directory-only agents)
-  const MAX_HOSTED = 47;
+  const MAX_HOSTED = 48;
   const totalHosted = await prisma.agent.count({ where: { status: 'running', hostIp: { not: null } } });
   if (totalHosted >= MAX_HOSTED) {
     throw new Error('All hosting slots are currently full. Join the waitlist — more capacity coming soon.');
