@@ -66,12 +66,8 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
   
   const existingAgents = user.agents.filter(a => a.status !== 'error');
   
-  // Hard cap on total HOSTED agents (with containers on Hetzner, not directory-only agents)
-  const MAX_HOSTED = 48;
-  const totalHosted = await prisma.agent.count({ where: { status: 'running', hostIp: { not: null } } });
-  if (totalHosted >= MAX_HOSTED) {
-    throw new Error('All hosting slots are currently full. Join the waitlist — more capacity coming soon.');
-  }
+  // Capacity is enforced at server level in hetzner-multi.ts (selectHost)
+  // It checks actual RAM availability and rejects when no eligible host exists
   
   // Auto-start trial for first agent if user has no agents and no trial/subscription
   if (existingAgents.length === 0 && (user.billingStatus === 'none' || !user.billingStatus)) {
