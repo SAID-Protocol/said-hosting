@@ -21,18 +21,31 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
         // Fetch user details from Privy to get wallet address
         let walletAddress: string | null = null;
         try {
-          const privyUser = await privyClient.getUserById(privyUserId);
-          // Reduced logging - was dumping full user object on every request
+          // Retry logic: Privy may still be creating the wallet after login
+          let privyUser;
+          let attempts = 0;
+          const maxAttempts = 3;
           
-          // Get the first Solana wallet (Privy creates embedded Solana wallets)
-          const solanaWallet = privyUser.linkedAccounts?.find((acc) => 
-            acc.type === 'wallet' && 'chainType' in acc && acc.chainType === 'solana'
-          );
-          
-          if (solanaWallet && solanaWallet.type === 'wallet' && 'address' in solanaWallet) {
-            walletAddress = solanaWallet.address;
-          } else {
-            console.warn('[auth] No Solana wallet found for user:', privyUserId);
+          while (attempts < maxAttempts) {
+            privyUser = await privyClient.getUserById(privyUserId);
+            
+            // Get the first Solana wallet (Privy creates embedded Solana wallets)
+            const solanaWallet = privyUser.linkedAccounts?.find((acc) => 
+              acc.type === 'wallet' && 'chainType' in acc && acc.chainType === 'solana'
+            );
+            
+            if (solanaWallet && solanaWallet.type === 'wallet' && 'address' in solanaWallet) {
+              walletAddress = solanaWallet.address;
+              break;
+            }
+            
+            // Wallet not ready yet, wait and retry
+            attempts++;
+            if (attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+            } else {
+              console.warn('[auth] No Solana wallet found after', maxAttempts, 'attempts:', privyUserId);
+            }
           }
         } catch (privyFetchError) {
           console.error('[auth] Failed to fetch Privy user wallet:', privyFetchError);

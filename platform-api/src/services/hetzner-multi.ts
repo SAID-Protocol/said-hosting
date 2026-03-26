@@ -92,6 +92,7 @@ async function getHostCapacity(): Promise<Map<string, number>> {
     by: ['hostIp'],
     where: {
       status: { in: ['running', 'creating'] },
+      gatewayToken: { not: null },  // Only count actually hosted agents (have gateway token)
     },
     _count: true,
   });
