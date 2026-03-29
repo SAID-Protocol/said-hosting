@@ -37,8 +37,8 @@ export const PRICING = {
   },
 } as const;
 
-// Trial duration
-const TRIAL_DAYS = 3;
+// Trial duration (7 days to match Virtuals Protocol)
+const TRIAL_DAYS = 7;
 // Grace period after failed payment
 const GRACE_DAYS = 3;
 // Days before data deletion after pause
