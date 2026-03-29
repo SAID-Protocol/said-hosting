@@ -6,6 +6,7 @@ import { initDb, prisma } from './db';
 import { agentRouter } from './routes/agents';
 import { billingRouter } from './routes/billing';
 import { balanceRouter } from './routes/balance';
+import { aiProxyRouter } from './routes/ai-proxy';
 import { runBillingCron } from './services/billing';
 import { authMiddleware } from './middleware/auth';
 
@@ -103,6 +104,7 @@ app.get('/api/stats', async (_req, res) => {
 app.use('/api/agents', authMiddleware, agentCreateLimiter, agentRouter);
 app.use('/api/billing', authMiddleware, billingLimiter, billingRouter);
 app.use('/api/balance', balanceRouter); // Public endpoint - no auth needed
+app.use('/api/ai-proxy', aiProxyRouter); // AI proxy for trial agents - auth via x-agent-id header
 
 async function start() {
   await initDb();

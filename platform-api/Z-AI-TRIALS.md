@@ -8,8 +8,15 @@
 ### 1. Extended Trial Period
 - Changed from **3 days → 7 days** to match Virtuals Protocol
 
-### 2. Sponsored API Costs via z.ai
+### 2. Sponsored API Costs via z.ai (Secure Proxy)
 Trial users now get sponsored API access via z.ai GLM models instead of requiring BYOK.
+
+**Security Model (Prevents Prompt Injection):**
+- Trial agents **DO NOT get direct API keys**
+- They call our secure proxy: `https://host.saidprotocol.com/api/ai-proxy`
+- Proxy authenticates agent via `x-agent-id` header
+- Real `Z_AI_API_KEY` stays server-side (never exposed to agents)
+- Even if agent is compromised: max 10 prompts damage (hard cap per user)
 
 **Why z.ai:**
 - **Cost:** $10/mo Lite plan = ~400 prompts/week (~40-50 trial users)
@@ -35,7 +42,39 @@ apiProvider         String    @default("byok")  // "byok" or "z-ai"
 - Tracks `trialPromptsUsed` per user
 - Admin dashboard shows total weekly burn
 
-### 5. Environment Variables
+### 5. Secure Proxy Architecture
+
+**Flow:**
+```
+Trial Agent (OpenClaw container)
+  ↓ OPENAI_BASE_URL=https://host.saidprotocol.com/api/ai-proxy
+  ↓ x-agent-id: <agent-uuid>
+  ↓
+Platform API (/api/ai-proxy/v1/chat/completions)
+  ↓ Authenticate agent via x-agent-id
+  ↓ Check trialPromptsUsed < trialPromptsLimit (server-side)
+  ↓ Add real Z_AI_API_KEY (never exposed)
+  ↓ Increment usage counter
+  ↓ Forward request to z.ai API
+  ↓
+z.ai GLM-4.7
+```
+
+**Agent Environment (no real key exposed):**
+```bash
+OPENAI_BASE_URL=https://host.saidprotocol.com/api/ai-proxy
+OPENAI_API_KEY=trial-agent  # Dummy key (proxy ignores it)
+ANTHROPIC_BASE_URL=https://host.saidprotocol.com/api/ai-proxy
+```
+
+**Prompt Injection Mitigation:**
+Even if attacker extracts the proxy URL and agent ID:
+- ✅ Rate limited to 10 prompts per agent (hard cap)
+- ✅ Server-side validation (can't bypass)
+- ✅ Real API key never exposed
+- ✅ Max damage: ~$0.20-0.30 per compromised agent
+
+### 6. Environment Variables
 
 **Required:**
 ```bash
@@ -48,7 +87,24 @@ Z_AI_BASE_URL=https://api.z.ai/v1
 TRIAL_PROMPTS_LIMIT=10  # Override default 10 prompts per trial user
 ```
 
-### 6. Deployment Steps
+### 7. New API Endpoints
+
+**POST /api/ai-proxy/v1/chat/completions**
+- OpenAI-compatible endpoint for trial agents
+- Authenticates via `x-agent-id` header
+- Proxies to z.ai with server-side key
+- Returns 429 when trial quota exceeded
+
+**GET /api/ai-proxy/quota**
+- Check remaining trial quota for an agent
+- Requires `x-agent-id` header
+- Returns: `{ used, limit, remaining, provider }`
+
+**GET /api/ai-proxy/health**
+- Health check for proxy service
+- Returns: `{ status: 'ok', service: 'ai-proxy', provider: 'z.ai' }`
+
+### 8. Deployment Steps
 
 1. **Get z.ai subscription:**
    - Go to https://z.ai/subscribe
@@ -74,7 +130,7 @@ TRIAL_PROMPTS_LIMIT=10  # Override default 10 prompts per trial user
    - Verify prompt counting works
    - Hit limit, check auto-pause message
 
-### 7. Pricing Tiers After Trial
+### 9. Pricing Tiers After Trial
 
 | Tier | Price | Model Access |
 |------|-------|--------------|
@@ -88,7 +144,7 @@ TRIAL_PROMPTS_LIMIT=10  # Override default 10 prompts per trial user
   1. Add their own API key (continue free with BYOK)
   2. Upgrade to paid BYOK tier (3-25 agents)
 
-### 8. Cost Safety
+### 10. Cost Safety
 
 **Hard caps:**
 - 10 prompts per trial user (~$0.20-0.30 cost)
@@ -105,7 +161,7 @@ TRIAL_PROMPTS_LIMIT=10  # Override default 10 prompts per trial user
 - Max 1 trial per email
 - IP rate limiting (existing)
 
-### 9. Future Enhancements
+### 11. Future Enhancements
 
 **Week 2-3:**
 - Admin dashboard: trial usage stats
@@ -123,7 +179,9 @@ TRIAL_PROMPTS_LIMIT=10  # Override default 10 prompts per trial user
 
 - `prisma/schema.prisma` - Added trial prompt tracking fields
 - `src/services/billing.ts` - Extended TRIAL_DAYS to 7
-- `Z-AI-TRIALS.md` - This file (deployment guide)
+- `src/routes/ai-proxy.ts` - NEW: Secure proxy for trial agents (prevents prompt injection)
+- `src/index.ts` - Registered ai-proxy router
+- `Z-AI-TRIALS.md` - This file (deployment guide with security model)
 
 ## Rollback Plan
 
