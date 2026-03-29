@@ -1,7 +1,8 @@
 # z.ai Trial Integration
 
 **Date:** March 29, 2026  
-**Status:** Ready to deploy (needs z.ai API key)
+**Status:** Ready to deploy (needs z.ai API key)  
+**Plan:** $80/mo custom plan (~10-12k prompts/week capacity)
 
 ## Changes
 
@@ -19,10 +20,11 @@ Trial users now get sponsored API access via z.ai GLM models instead of requirin
 - Even if agent is compromised: max 10 prompts damage (hard cap per user)
 
 **Why z.ai:**
-- **Cost:** $10/mo Lite plan = ~400 prompts/week (~40-50 trial users)
+- **Cost:** $80/mo custom plan = ~10-12k prompts/week (~20-24 trial users at 500 prompts each)
 - **Quality:** GLM-4.7 is excellent for agents (fast, tool-capable)
 - **OpenClaw native:** Works out of the box
 - **Better conversion:** Zero friction signup (no API key required)
+- **Competitive:** 500 prompts (~$0.80 value) matches Virtuals' $1 credit trial
 
 ### 3. Database Schema Changes
 
@@ -37,7 +39,8 @@ apiProvider         String    @default("byok")  // "byok" or "z-ai"
 
 ### 4. Usage Tracking
 
-- Each trial user gets **10 prompts** (≈150-200 agent turns)
+- Each trial user gets **500 prompts** (≈~$0.80 value, matches Virtuals' $1 credit)
+- Enough for meaningful testing over 7 days (50-100 conversations)
 - When limit hit: "Trial limit reached. Add your own API key or upgrade."
 - Tracks `trialPromptsUsed` per user
 - Admin dashboard shows total weekly burn
@@ -69,10 +72,10 @@ ANTHROPIC_BASE_URL=https://host.saidprotocol.com/api/ai-proxy
 
 **Prompt Injection Mitigation:**
 Even if attacker extracts the proxy URL and agent ID:
-- ✅ Rate limited to 10 prompts per agent (hard cap)
+- ✅ Rate limited to 500 prompts per agent (hard cap)
 - ✅ Server-side validation (can't bypass)
 - ✅ Real API key never exposed
-- ✅ Max damage: ~$0.20-0.30 per compromised agent
+- ✅ Max damage: ~$0.80 per compromised agent
 
 ### 6. Environment Variables
 
@@ -84,7 +87,7 @@ Z_AI_BASE_URL=https://api.z.ai/v1
 
 **Optional:**
 ```bash
-TRIAL_PROMPTS_LIMIT=10  # Override default 10 prompts per trial user
+TRIAL_PROMPTS_LIMIT=500  # Override default 500 prompts per trial user
 ```
 
 ### 7. New API Endpoints
@@ -108,8 +111,8 @@ TRIAL_PROMPTS_LIMIT=10  # Override default 10 prompts per trial user
 
 1. **Get z.ai subscription:**
    - Go to https://z.ai/subscribe
-   - Choose **Lite Plan ($10/mo)** for ~40-50 trial users/week
-   - Or **Pro Plan ($30/mo)** for ~200-400 trial users/week
+   - Choose **$80/mo custom plan** for ~20-24 trial users/week at 500 prompts each
+   - Higher capacity than Lite/Pro for serious trial volume
 
 2. **Add environment variables to Railway:**
    ```
@@ -147,19 +150,20 @@ TRIAL_PROMPTS_LIMIT=10  # Override default 10 prompts per trial user
 ### 10. Cost Safety
 
 **Hard caps:**
-- 10 prompts per trial user (~$0.20-0.30 cost)
+- 500 prompts per trial user (~$0.80 cost)
 - Auto-pause agent at limit
 - Weekly usage dashboard for monitoring
 
-**Lite Plan ($10/mo) capacity:**
-- 400 prompts/week total
-- ~40-50 trial users/week at 10 prompts each
-- If exceeded: prompt users to upgrade OR wait for weekly reset
+**$80/mo Custom Plan capacity:**
+- ~10-12k prompts/week estimated
+- ~20-24 trial users/week at 500 prompts each
+- Enough headroom for growth
 
 **Abuse prevention:**
 - Email verification required for trials
 - Max 1 trial per email
 - IP rate limiting (existing)
+- Server-side quota enforcement (can't bypass)
 
 ### 11. Future Enhancements
 

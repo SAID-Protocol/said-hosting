@@ -25,7 +25,7 @@ model User {
   graceStartedAt      DateTime? @map("grace_started_at")
   signerConsented     Boolean   @default(false) @map("signer_consented")
   trialPromptsUsed    Int       @default(0) @map("trial_prompts_used")
-  trialPromptsLimit   Int       @default(10) @map("trial_prompts_limit")
+  trialPromptsLimit   Int       @default(500) @map("trial_prompts_limit")
   apiProvider         String    @default("byok") @map("api_provider") // byok, z-ai
   createdAt           DateTime  @default(now()) @map("created_at")
   agents              Agent[]
