@@ -13,6 +13,7 @@ const SOLANA_RPC_URL: string = process.env.SOLANA_RPC_URL;
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const USDC_DECIMALS = 6;
 const FUNDING_AMOUNTS: Record<string, number> = {
+  trial: 0,    // No USDC funding for trials (they use z.ai sponsored API instead)
   starter: 2,
   pro: 5,
   power: 15,
@@ -166,6 +167,15 @@ function getFundingKeypair(): Keypair {
 
 export async function fundAgentWallet(agentWallet: string, tier: string): Promise<FundingResult> {
   const amountUsdc = getFundingAmountUsdc(tier);
+
+  // Skip funding for trial tier (they use z.ai sponsored API instead)
+  if (amountUsdc === 0) {
+    return {
+      success: true,
+      amountUsdc: 0,
+      signature: null,
+    };
+  }
 
   try {
     const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
