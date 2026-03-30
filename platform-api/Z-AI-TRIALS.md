@@ -82,7 +82,7 @@ Even if attacker extracts the proxy URL and agent ID:
 **Required:**
 ```bash
 Z_AI_API_KEY=sk-...   # Get from https://z.ai/manage-apikey
-Z_AI_BASE_URL=https://api.z.ai/v1
+Z_AI_BASE_URL=https://api.z.ai/api/paas/v4/
 ```
 
 **Optional:**
