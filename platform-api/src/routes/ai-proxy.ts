@@ -119,40 +119,67 @@ aiProxyRouter.post('/v1/chat/completions', async (req, res) => {
       max_tokens: req.body.max_tokens || 4096,
     };
 
-    const response = await axios.post(
-      `${zaiBaseUrl}/chat/completions`,
-      forwardBody,
-      {
-        headers: {
-          'Authorization': `Bearer ${zaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    const latency = Date.now() - startTime;
-
-    // Increment usage counter (1 prompt = 1 request to this endpoint)
+    // Increment usage counter BEFORE the call (1 prompt = 1 request)
     await prisma.user.update({
       where: { id: user.id },
       data: { trialPromptsUsed: user.trialPromptsUsed + 1 },
     });
 
-    console.log(`[ai-proxy] Agent ${agent.name} (${agentId}): ${user.trialPromptsUsed + 1}/${user.trialPromptsLimit} prompts used (${latency}ms)`);
+    const isStreaming = forwardBody.stream === true;
 
-    // Handle z.ai reasoning models: if content is empty but reasoning_content exists,
-    // copy reasoning_content to content so OpenClaw can display the response
-    const data = response.data;
-    if (data?.choices) {
-      for (const choice of data.choices) {
-        if (choice.message && !choice.message.content && choice.message.reasoning_content) {
-          choice.message.content = choice.message.reasoning_content;
+    if (isStreaming) {
+      // Streaming: pipe SSE response directly through to OpenClaw
+      const response = await axios.post(
+        `${zaiBaseUrl}/chat/completions`,
+        forwardBody,
+        {
+          headers: {
+            'Authorization': `Bearer ${zaiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          responseType: 'stream',
+        }
+      );
+
+      const latency = Date.now() - startTime;
+      console.log(`[ai-proxy] Agent ${agent.name} (${agentId}): ${user.trialPromptsUsed + 1}/${user.trialPromptsLimit} prompts used (${latency}ms, streaming)`);
+
+      // Forward headers for SSE
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      // Pipe z.ai SSE stream directly to client
+      response.data.pipe(res);
+    } else {
+      // Non-streaming: buffer response, transform reasoning_content
+      const response = await axios.post(
+        `${zaiBaseUrl}/chat/completions`,
+        forwardBody,
+        {
+          headers: {
+            'Authorization': `Bearer ${zaiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const latency = Date.now() - startTime;
+      console.log(`[ai-proxy] Agent ${agent.name} (${agentId}): ${user.trialPromptsUsed + 1}/${user.trialPromptsLimit} prompts used (${latency}ms)`);
+
+      // Handle z.ai reasoning models: if content is empty but reasoning_content exists,
+      // copy reasoning_content to content so OpenClaw can display the response
+      const data = response.data;
+      if (data?.choices) {
+        for (const choice of data.choices) {
+          if (choice.message && !choice.message.content && choice.message.reasoning_content) {
+            choice.message.content = choice.message.reasoning_content;
+          }
         }
       }
-    }
 
-    // Return response to agent
-    res.json(data);
+      res.json(data);
+    }
 
   } catch (error: any) {
     console.error('[ai-proxy] Error:', error.message);
