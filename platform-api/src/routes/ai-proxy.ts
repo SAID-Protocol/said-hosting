@@ -134,8 +134,19 @@ aiProxyRouter.post('/v1/chat/completions', async (req, res) => {
 
     console.log(`[ai-proxy] Agent ${agent.name} (${agentId}): ${user.trialPromptsUsed + 1}/${user.trialPromptsLimit} prompts used (${latency}ms)`);
 
+    // Handle z.ai reasoning models: if content is empty but reasoning_content exists,
+    // copy reasoning_content to content so OpenClaw can display the response
+    const data = response.data;
+    if (data?.choices) {
+      for (const choice of data.choices) {
+        if (choice.message && !choice.message.content && choice.message.reasoning_content) {
+          choice.message.content = choice.message.reasoning_content;
+        }
+      }
+    }
+
     // Return response to agent
-    res.json(response.data);
+    res.json(data);
 
   } catch (error: any) {
     console.error('[ai-proxy] Error:', error.message);
