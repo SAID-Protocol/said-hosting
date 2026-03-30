@@ -51,7 +51,9 @@ fi
 # Use OpenRouter as LLM provider (per-agent key with spending limits)
 # Trial agents use z.ai proxy instead of OpenRouter
 # Falls back to direct Anthropic if no OpenRouter key provided
-if [ "$SAID_AGENT_TIER" = "trial" ] && [ -n "$OPENAI_BASE_URL" ]; then
+if [ "$SAID_AGENT_TIER" = "trial" ]; then
+  # Default z.ai proxy URL if not explicitly set
+  export OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://app.saidprotocol.com/api/ai-proxy}"
   echo "[said-hosting] Trial agent — using z.ai proxy at $OPENAI_BASE_URL"
   node -e "
     const tgToken = process.env.SAID_TELEGRAM_TOKEN;
