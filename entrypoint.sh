@@ -90,6 +90,18 @@ if [ "$SAID_AGENT_TIER" = "trial" ] && [ -n "$OPENAI_BASE_URL" ]; then
           }
         }
       },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: process.env.OPENAI_BASE_URL,
+            auth: 'api-key',
+            api: 'openai-completions',
+            models: [
+              { id: 'gpt-4o', name: 'GPT-4o (z.ai proxy)', api: 'openai-completions' }
+            ]
+          }
+        }
+      },
       agents: { defaults: { model: { primary: 'openai/gpt-4o' }, maxConcurrent: 2 } },
       env: {
         OPENAI_API_KEY: process.env.OPENAI_API_KEY,
