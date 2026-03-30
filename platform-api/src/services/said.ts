@@ -173,7 +173,6 @@ export async function fundAgentWallet(agentWallet: string, tier: string): Promis
     return {
       success: true,
       amountUsdc: 0,
-      signature: null,
     };
   }
 
