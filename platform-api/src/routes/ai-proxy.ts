@@ -109,9 +109,13 @@ aiProxyRouter.post('/v1/chat/completions', async (req, res) => {
 
     const startTime = Date.now();
     
+    // Override model to z.ai's model (OpenClaw sends gpt-4o to pass validation,
+    // but z.ai needs glm-4.7)
+    const forwardBody = { ...req.body, model: 'glm-4.7' };
+
     const response = await axios.post(
       `${zaiBaseUrl}/chat/completions`,
-      req.body,
+      forwardBody,
       {
         headers: {
           'Authorization': `Bearer ${zaiApiKey}`,
