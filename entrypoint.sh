@@ -90,7 +90,7 @@ if [ "$SAID_AGENT_TIER" = "trial" ] && [ -n "$OPENAI_BASE_URL" ]; then
           }
         }
       },
-      agents: { defaults: { model: { primary: 'openai/glm-4.7' }, maxConcurrent: 2 } },
+      agents: { defaults: { model: { primary: 'openai/gpt-4o' }, maxConcurrent: 2 } },
       env: {
         OPENAI_API_KEY: process.env.OPENAI_API_KEY,
         OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
