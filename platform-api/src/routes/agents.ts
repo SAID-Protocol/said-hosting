@@ -265,6 +265,11 @@ agentRouter.post('/:id/chat', async (req, res) => {
         ? `http://${agent.hostIp || process.env.HETZNER_HOST || '87.99.140.184'}:${port}/v1/chat/completions`
         : `https://${agent.flyAppName}.fly.dev/v1/chat/completions`;
 
+      // Trial agents use z.ai proxy (openai/gpt-4o), all others use OpenRouter
+      const chatModel = agent.tier === 'trial'
+        ? 'openai/gpt-4o'
+        : 'openrouter/anthropic/claude-sonnet-4-5';
+
       const response = await fetch(chatUrl, {
         method: 'POST',
         headers: {
@@ -272,9 +277,7 @@ agentRouter.post('/:id/chat', async (req, res) => {
           'Authorization': `Bearer ${providedToken}`,
         },
         body: JSON.stringify({
-          model: (agent.tier === 'pro' || agent.tier === 'power') 
-            ? 'openrouter/anthropic/claude-sonnet-4-5' 
-            : 'openrouter/anthropic/claude-sonnet-4-5',
+          model: chatModel,
           messages: messages,
         }),
         signal: controller.signal,
