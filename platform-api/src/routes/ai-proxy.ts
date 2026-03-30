@@ -168,10 +168,25 @@ aiProxyRouter.get('/health', (req, res) => {
  */
 aiProxyRouter.get('/quota', async (req, res) => {
   try {
-    const agentId = req.headers['x-agent-id'] as string;
+    // Extract agent ID (same logic as chat endpoint)
+    let agentId = req.headers['x-agent-id'] as string;
+    
+    if (!agentId && req.query.agent_id) {
+      agentId = req.query.agent_id as string;
+    }
     
     if (!agentId) {
-      return res.status(401).json({ error: 'Missing x-agent-id header' });
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.substring(7);
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
+          agentId = token;
+        }
+      }
+    }
+    
+    if (!agentId) {
+      return res.status(401).json({ error: 'Missing agent authentication' });
     }
 
     const agent = await prisma.agent.findUnique({
