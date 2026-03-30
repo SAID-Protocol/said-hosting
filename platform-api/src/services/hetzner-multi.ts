@@ -181,6 +181,9 @@ export async function createContainer(params: {
   const safeName = sanitizeName(params.agentName || 'SAID Agent');
   const safeDesc = sanitizeName(params.agentDescription || '');
 
+  // For trial agents, use z.ai proxy instead of OpenRouter
+  const isTrial = params.tier === 'trial';
+  
   const envVars = [
     `SAID_AGENT_TIER=${params.tier}`,
     `SAID_AGENT_ID=${params.agentId}`,
@@ -193,6 +196,16 @@ export async function createContainer(params: {
     `SAID_TELEGRAM_TOKEN=${params.telegramToken || ''}`,
     `NODE_OPTIONS=--max-old-space-size=1536`,
   ];
+  
+  // Configure z.ai proxy for trial agents
+  if (isTrial) {
+    envVars.push(
+      `OPENAI_BASE_URL=https://app.saidprotocol.com/api/ai-proxy`,
+      `ANTHROPIC_BASE_URL=https://app.saidprotocol.com/api/ai-proxy`,
+      `OPENAI_API_KEY=${params.agentId}`, // Agent ID as API key - proxy extracts it from Bearer header
+    );
+    console.log('[hetzner] Trial agent - configured z.ai proxy URLs with agent ID as key');
+  }
 
   const envFlags = envVars.map(v => `-e '${v}'`).join(' ');
   const dataDir = `/opt/said-hosting/agents/${params.agentId}`;

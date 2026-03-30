@@ -25,14 +25,30 @@ export const aiProxyRouter = Router();
  */
 aiProxyRouter.post('/v1/chat/completions', async (req, res) => {
   try {
-    // Extract agent auth from header (gateway token or agent ID)
-    const authHeader = req.headers.authorization;
-    const agentId = req.headers['x-agent-id'] as string;
+    // Extract agent ID from header, query param, or Authorization Bearer token
+    // Trial agents set SAID_AGENT_ID env which OpenClaw can pass as Bearer token
+    let agentId = req.headers['x-agent-id'] as string;
+    
+    if (!agentId && req.query.agent_id) {
+      agentId = req.query.agent_id as string;
+    }
+    
+    if (!agentId) {
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith('Bearer ')) {
+        // Try treating the Bearer token as agent ID (for simplicity)
+        const token = authHeader.substring(7);
+        // Check if it's a UUID (agent ID format)
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
+          agentId = token;
+        }
+      }
+    }
     
     if (!agentId) {
       return res.status(401).json({ 
         error: { 
-          message: 'Missing x-agent-id header',
+          message: 'Missing agent authentication. Provide x-agent-id header, ?agent_id query param, or Bearer token',
           type: 'authentication_error' 
         }
       });

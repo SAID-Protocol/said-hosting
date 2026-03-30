@@ -170,17 +170,32 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
 
   let containerId: string | null = null;
   let orKeyHash: string | null = null;
+  const isTrialAgent = tier === 'trial';
+  
   try {
     // Use custom API key if provided, otherwise create a managed OpenRouter key
+    // EXCEPT for trial agents - they use z.ai proxy
     let apiKey: string;
     if (payload.custom_api_key?.trim()) {
       apiKey = payload.custom_api_key.trim();
       console.log('[createAgent] Using custom API key (user-provided)');
+    } else if (isTrialAgent) {
+      apiKey = 'trial-agent'; // Dummy key - will use z.ai proxy instead
+      console.log('[createAgent] Trial agent - using z.ai proxy (no OpenRouter key)');
     } else {
       const orKey = await createAgentKey(agentId, payload.name.trim(), tier);
       orKeyHash = orKey.hash;
       apiKey = orKey.key;
       console.log('[createAgent] Using managed OpenRouter key');
+    }
+
+    // For trial agents, set user's apiProvider to z-ai
+    if (isTrialAgent && user.apiProvider !== 'z-ai') {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { apiProvider: 'z-ai' },
+      });
+      console.log('[createAgent] Set user apiProvider to z-ai for trial');
     }
 
     // Create DB record FIRST so bootstrap can find it when container starts
