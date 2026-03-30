@@ -265,7 +265,94 @@ export async function createContainer(params: {
  */
 export async function startContainer(agentId: string, hostIp: string): Promise<void> {
   const containerName = getContainerName(agentId);
-  await sshExec(hostIp, `docker start ${containerName}`);
+  try {
+    await sshExec(hostIp, `docker start ${containerName}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('No such container')) {
+      // Container was removed — recreate from saved state
+      console.log(`[hetzner:${hostIp}] Container ${containerName} missing, recreating...`);
+      await recreateContainer(agentId, hostIp);
+    } else {
+      throw err;
+    }
+  }
+}
+
+/**
+ * Recreate a missing container from DB state + saved volume data
+ */
+async function recreateContainer(agentId: string, hostIp: string): Promise<void> {
+  const agent = await prisma.agent.findUnique({ where: { id: agentId } });
+  if (!agent) throw new Error('Agent not found in DB');
+
+  const containerName = getContainerName(agentId);
+  const tier = (agent.tier || 'free') as TierKey;
+  const tierConfig = TIER_CONFIGS[tier] || TIER_CONFIGS.free;
+  const port = await findNextPort(hostIp);
+  const dataDir = `/opt/said-hosting/agents/${agentId}`;
+
+  const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9 _\-\.]/g, '').slice(0, 64);
+  const safeName = sanitize(agent.name || 'SAID Agent');
+
+  // Generate new gateway token and update hash in DB
+  const crypto = await import('crypto');
+  const newGatewayToken = crypto.randomBytes(24).toString('hex');
+  const { hashGatewayToken } = await import('../utils/auth');
+  const newHash = hashGatewayToken(newGatewayToken);
+
+  const envVars = [
+    `SAID_AGENT_TIER=${tier}`,
+    `SAID_AGENT_ID=${agentId}`,
+    `SAID_AGENT_NAME=${safeName}`,
+    `SAID_PLATFORM_API=https://app.saidprotocol.com`,
+    `SAID_PLATFORM_API_KEY=${process.env.API_KEY || ''}`,
+    `OPENCLAW_GATEWAY_TOKEN=${newGatewayToken}`,
+    `NODE_OPTIONS=--max-old-space-size=1536`,
+  ];
+
+  // Trial agents get z.ai proxy config
+  if (tier === 'trial') {
+    envVars.push(
+      `OPENAI_BASE_URL=https://app.saidprotocol.com/api/ai-proxy`,
+      `ANTHROPIC_BASE_URL=https://app.saidprotocol.com/api/ai-proxy`,
+      `OPENAI_API_KEY=${agentId}`,
+    );
+  }
+
+  const envFlags = envVars.map(v => `-e '${v}'`).join(' ');
+
+  const dockerCmd = `docker run -d \
+    --name ${containerName} \
+    --restart unless-stopped \
+    --memory=${tierConfig.memory}m \
+    --cpus=0.5 \
+    -v ${dataDir}:/data \
+    -v /opt/said-hosting/docker/entrypoint.sh:/agent/entrypoint.sh:ro \
+    -v /opt/said-hosting/docker/config:/agent/config:ro \
+    -v /opt/said-hosting/docker/scripts:/agent/scripts:ro \
+    -p 0.0.0.0:${port}:18789 \
+    ${envFlags} \
+    -e PROGRAM_MD="$(cat ${dataDir}/.program_md 2>/dev/null || echo '')" \
+    -e WORKSPACE_FILES_JSON="$(cat ${dataDir}/.workspace_files 2>/dev/null || echo '[]')" \
+    -e AGENT_CONFIG_JSON="$(cat ${dataDir}/.agent_config 2>/dev/null || echo '{}')" \
+    said-agent:latest \
+    /agent/entrypoint.sh`;
+
+  await sshExec(hostIp, dockerCmd);
+  
+  // Update port, hash, and store new gateway token for frontend retrieval
+  await prisma.agent.update({ 
+    where: { id: agentId }, 
+    data: { 
+      flyAppName: `hetzner:${port}`, 
+      status: 'running',
+      gatewayTokenHash: newHash,
+      gatewayToken: newGatewayToken,  // Plaintext for frontend to pick up
+    } 
+  });
+
+  console.log(`[hetzner:${hostIp}] Recreated ${containerName} on port ${port}`);
 }
 
 /**
