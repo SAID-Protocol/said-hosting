@@ -111,7 +111,13 @@ aiProxyRouter.post('/v1/chat/completions', async (req, res) => {
     
     // Override model to z.ai's model (OpenClaw sends gpt-4o to pass validation,
     // but z.ai needs a GLM model). Using glm-5 for reliability.
-    const forwardBody = { ...req.body, model: 'glm-5' };
+    // Ensure max_tokens is set — GLM-5 uses reasoning tokens first, so without
+    // enough tokens the actual content will be empty.
+    const forwardBody = {
+      ...req.body,
+      model: 'glm-5',
+      max_tokens: req.body.max_tokens || 4096,
+    };
 
     const response = await axios.post(
       `${zaiBaseUrl}/chat/completions`,
