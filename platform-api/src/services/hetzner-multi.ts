@@ -264,11 +264,17 @@ export async function stopContainer(agentId: string, hostIp: string): Promise<vo
 }
 
 /**
- * Remove container and data
+ * Remove container (but preserve volume data for user restoration)
+ * 
+ * Volume data remains at /opt/said-hosting/agents/${agentId}
+ * Users can restore their agent by reactivating their subscription
+ * 
+ * Storage cost: ~$0.50 per 10GB (Hetzner volumes)
+ * Upgrade volumes as needed when capacity fills
  */
 export async function deleteContainer(agentId: string, hostIp: string): Promise<void> {
   const containerName = getContainerName(agentId);
-  await sshExec(hostIp, `docker rm -f ${containerName} 2>/dev/null; rm -rf /opt/said-hosting/agents/${agentId}`);
+  await sshExec(hostIp, `docker rm -f ${containerName} 2>/dev/null || true`);
 }
 
 /**
