@@ -93,7 +93,7 @@ if [ "$SAID_AGENT_TIER" = "trial" ] && [ -n "$OPENAI_BASE_URL" ]; then
       models: {
         providers: {
           openai: {
-            baseUrl: process.env.OPENAI_BASE_URL,
+            baseUrl: process.env.OPENAI_BASE_URL + '/v1',
             auth: 'api-key',
             api: 'openai-completions',
             models: [
