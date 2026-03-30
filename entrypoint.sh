@@ -49,8 +49,60 @@ fi
 
 # Always write fresh config (gateway restarts need clean state)
 # Use OpenRouter as LLM provider (per-agent key with spending limits)
+# Trial agents use z.ai proxy instead of OpenRouter
 # Falls back to direct Anthropic if no OpenRouter key provided
-if [ -n "$OPENROUTER_API_KEY" ]; then
+if [ "$SAID_AGENT_TIER" = "trial" ] && [ -n "$OPENAI_BASE_URL" ]; then
+  echo "[said-hosting] Trial agent — using z.ai proxy at $OPENAI_BASE_URL"
+  node -e "
+    const tgToken = process.env.SAID_TELEGRAM_TOKEN;
+    const gwToken = process.env.GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN;
+    const config = {
+      meta: {
+        lastTouchedVersion: '2026.3.8',
+        lastTouchedAt: new Date().toISOString()
+      },
+      gateway: {
+        controlUi: {
+          dangerouslyAllowHostHeaderOriginFallback: true
+        },
+        http: {
+          endpoints: {
+            chatCompletions: { enabled: true }
+          }
+        },
+        auth: gwToken ? { mode: 'token', token: gwToken } : undefined
+      },
+      channels: tgToken ? {
+        telegram: {
+          enabled: true,
+          botToken: tgToken,
+          dmPolicy: 'open',
+          allowFrom: ['*'],
+          groupPolicy: 'open',
+          groupAllowFrom: ['*']
+        }
+      } : {},
+      auth: {
+        profiles: {
+          'openai:default': {
+            provider: 'openai',
+            mode: 'api_key'
+          }
+        }
+      },
+      agents: { defaults: { model: { primary: 'openai/glm-4.7' }, maxConcurrent: 2 } },
+      env: {
+        OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+        OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+        SAID_IDENTITY_WALLET: process.env.SAID_IDENTITY_WALLET,
+        SAID_WALLET_ADDRESS: process.env.SAID_WALLET_ADDRESS
+      }
+    };
+    // Clean undefined values
+    if (!config.gateway.auth) delete config.gateway.auth;
+    require('fs').writeFileSync('$OPENCLAW_DIR/openclaw.json', JSON.stringify(config, null, 2));
+  "
+elif [ -n "$OPENROUTER_API_KEY" ]; then
   echo "[said-hosting] Using OpenRouter for LLM access (per-agent key)"
   node -e "
     const tgToken = process.env.SAID_TELEGRAM_TOKEN;
