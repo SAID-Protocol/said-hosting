@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { createAgent, deleteAgent, getAgentById, getAgentLogs, getAgentStatus, listAgents, startAgent, stopAgent, updateAgent, registerAgentSaid, confirmAgentSaid } from '../services/agent';
 import { CreateAgentRequest } from '../types';
 import { getKeyInfo } from '../services/openrouter';
+import { prisma } from '../db';
 
 export const agentRouter = Router();
 
@@ -189,12 +190,30 @@ agentRouter.get('/:id/usage', async (req, res) => {
     const userId = (req as typeof req & { userId: string }).userId;
     const agent = await getAgentById(userId, req.params.id);
     if (!agent) { res.status(404).json({ error: 'Agent not found' }); return; }
+
+    // Trial agents use z.ai proxy with prompt-based quota
+    if (agent.tier === 'trial') {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      res.json({
+        llm: {
+          provider: 'z-ai',
+          unit: 'prompts',
+          used: user?.trialPromptsUsed ?? 0,
+          limit: user?.trialPromptsLimit ?? 500,
+          remaining: Math.max(0, (user?.trialPromptsLimit ?? 500) - (user?.trialPromptsUsed ?? 0)),
+        },
+        tier: 'trial',
+      });
+      return;
+    }
+
     if (!agent.openrouterKeyHash) { res.json({ llm: null, message: 'No OpenRouter key configured' }); return; }
 
     const keyInfo = await getKeyInfo(agent.openrouterKeyHash);
     res.json({
       llm: {
         provider: 'openrouter',
+        unit: 'credits',
         limit: keyInfo.limit,
         used: keyInfo.usage,
         remaining: keyInfo.limit_remaining,
