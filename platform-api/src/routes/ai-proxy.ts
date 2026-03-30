@@ -105,7 +105,7 @@ aiProxyRouter.post('/v1/chat/completions', async (req, res) => {
       });
     }
 
-    const zaiBaseUrl = process.env.Z_AI_BASE_URL || 'https://api.z.ai/api/paas/v4';
+    const zaiBaseUrl = process.env.Z_AI_BASE_URL || 'https://api.z.ai/api/coding/paas/v4';
 
     const startTime = Date.now();
     
