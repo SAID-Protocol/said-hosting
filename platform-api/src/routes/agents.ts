@@ -46,7 +46,6 @@ agentRouter.post('/:id/report-wallet', async (req, res) => {
       where: { id: req.params.id },
       data: { 
         walletAddress: walletAddress.trim(), 
-        saidIdentity: walletAddress.trim(),
         ...(saidPda ? { saidPda } : {}),
       },
     });
