@@ -48,37 +48,19 @@ agentRouter.post('/:id/report-wallet', async (req, res) => {
       
       if (accountInfo && accountInfo.data) {
         saidRegistered = true;
-        // SAID account data layout: 8 byte discriminator + 32 byte authority + 32 byte wallet 
-        // + 4 byte name len + name + 4 byte desc len + desc + 1 byte verified flag
-        // The verified flag is a boolean in the account data
-        // For simplicity, check if the account exists and has data > 72 bytes
-        // then read the verified flag from the expected offset
+        // SAID AgentIdentity layout (Anchor/Borsh):
+        // 8 (discriminator) + 32 (owner) + 32 (authority) + 4+N (metadata_uri string) + 8 (created_at i64) + 1 (is_verified bool) + ...
         const data = accountInfo.data;
         if (data.length > 72) {
-          // Skip: 8 (discriminator) + 32 (authority) + 32 (wallet) = 72
-          // Then: 4 byte name length + name string + 4 byte desc length + desc string + 1 byte verified
-          let offset = 72;
-          // Read name length (4 bytes LE)
-          const nameLen = data.readUInt32LE(offset);
-          offset += 4 + nameLen;
-          // Read description length (4 bytes LE)
-          if (offset + 4 <= data.length) {
-            const descLen = data.readUInt32LE(offset);
-            offset += 4 + descLen;
-            // Read capabilities vec length
-            if (offset + 4 <= data.length) {
-              const capsLen = data.readUInt32LE(offset);
-              offset += 4;
-              // Each capability is a string (4 byte len + string)
-              for (let i = 0; i < capsLen && offset + 4 <= data.length; i++) {
-                const capLen = data.readUInt32LE(offset);
-                offset += 4 + capLen;
-              }
-              // Next byte should be the verified flag
-              if (offset < data.length) {
-                saidVerified = data[offset] === 1;
-              }
-            }
+          let offset = 8 + 32 + 32; // skip discriminator + owner + authority = 72
+          // Read metadata_uri (Borsh string: 4 byte LE length + string bytes)
+          const uriLen = data.readUInt32LE(offset);
+          offset += 4 + uriLen;
+          // Skip created_at (i64, 8 bytes)
+          offset += 8;
+          // Read is_verified (bool, 1 byte)
+          if (offset < data.length) {
+            saidVerified = data[offset] === 1;
           }
         }
         console.log(`[report-wallet] On-chain SAID: pda=${saidPda} registered=${saidRegistered} verified=${saidVerified}`);

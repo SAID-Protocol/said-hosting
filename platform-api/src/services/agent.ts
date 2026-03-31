@@ -350,9 +350,9 @@ export async function confirmAgentSaid(agentId: string, signedTransaction: strin
         },
   });
 
-  if (funding.success) {
+  if (funding.success && funding.amountUsdc > 0) {
     logActivity(agentId, 'system', `Funded ${funding.amountUsdc} USDC (${funding.signature})`);
-  } else {
+  } else if (!funding.success && agent.tier !== 'trial') {
     console.error(`[agents] Failed to fund agent ${agentId}: ${funding.error}`);
     logActivity(agentId, 'error', `USDC funding failed: ${funding.error}`);
   }
