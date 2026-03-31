@@ -326,6 +326,16 @@ chown -R agent:agent "$WORKSPACE" 2>/dev/null || true
 
 cd "$WORKSPACE"
 
+# Report wallet address back to platform API
+if [ -n "$SAID_IDENTITY_WALLET" ] && [ -n "$SAID_PLATFORM_API" ] && [ -n "$SAID_AGENT_ID" ]; then
+  echo "[said-hosting] Reporting wallet $SAID_IDENTITY_WALLET to platform API..."
+  curl -s -X POST "$SAID_PLATFORM_API/api/agents/$SAID_AGENT_ID/report-wallet" \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: ${SAID_PLATFORM_API_KEY:-}" \
+    -d "{\"walletAddress\": \"$SAID_IDENTITY_WALLET\"}" \
+    > /dev/null 2>&1 || echo "[said-hosting] Warning: Failed to report wallet to platform API"
+fi
+
 echo "[said-hosting] Starting OpenClaw gateway..."
 echo "[said-hosting] Agent: $AGENT_NAME | Tier: ${SAID_TIER:-starter} | Wallet: ${SAID_IDENTITY_WALLET:-unknown}"
 

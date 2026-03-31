@@ -6,6 +6,38 @@ import { prisma } from '../db';
 
 export const agentRouter = Router();
 
+// Lightweight: store wallet address from container boot (no on-chain registration)
+agentRouter.post('/:id/report-wallet', async (req, res) => {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.API_KEY) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const walletAddress = req.body?.walletAddress;
+    if (typeof walletAddress !== 'string' || !walletAddress.trim()) {
+      res.status(400).json({ error: 'walletAddress is required' });
+      return;
+    }
+
+    const agent = await prisma.agent.findUnique({ where: { id: req.params.id } });
+    if (!agent) {
+      res.status(404).json({ error: 'Agent not found' });
+      return;
+    }
+
+    await prisma.agent.update({
+      where: { id: req.params.id },
+      data: { walletAddress: walletAddress.trim(), saidIdentity: walletAddress.trim() },
+    });
+
+    res.json({ ok: true, walletAddress: walletAddress.trim() });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed' });
+  }
+});
+
 agentRouter.post('/:id/register-said', async (req, res) => {
   try {
     const apiKey = req.headers['x-api-key'];
