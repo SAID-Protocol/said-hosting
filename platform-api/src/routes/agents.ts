@@ -27,10 +27,12 @@ agentRouter.post('/:id/report-wallet', async (req, res) => {
       return;
     }
 
-    // Derive SAID PDA from wallet address
+    // Query on-chain SAID identity
     let saidPda: string | null = null;
+    let saidVerified = false;
+    let saidRegistered = false;
     try {
-      const { PublicKey } = await import('@solana/web3.js');
+      const { PublicKey, Connection } = await import('@solana/web3.js');
       const SAID_PROGRAM_ID = new PublicKey('5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G');
       const walletPubkey = new PublicKey(walletAddress.trim());
       const [pda] = PublicKey.findProgramAddressSync(
@@ -38,8 +40,53 @@ agentRouter.post('/:id/report-wallet', async (req, res) => {
         SAID_PROGRAM_ID
       );
       saidPda = pda.toString();
+
+      // Check if PDA account exists on-chain
+      const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+      const connection = new Connection(rpcUrl);
+      const accountInfo = await connection.getAccountInfo(pda);
+      
+      if (accountInfo && accountInfo.data) {
+        saidRegistered = true;
+        // SAID account data layout: 8 byte discriminator + 32 byte authority + 32 byte wallet 
+        // + 4 byte name len + name + 4 byte desc len + desc + 1 byte verified flag
+        // The verified flag is a boolean in the account data
+        // For simplicity, check if the account exists and has data > 72 bytes
+        // then read the verified flag from the expected offset
+        const data = accountInfo.data;
+        if (data.length > 72) {
+          // Skip: 8 (discriminator) + 32 (authority) + 32 (wallet) = 72
+          // Then: 4 byte name length + name string + 4 byte desc length + desc string + 1 byte verified
+          let offset = 72;
+          // Read name length (4 bytes LE)
+          const nameLen = data.readUInt32LE(offset);
+          offset += 4 + nameLen;
+          // Read description length (4 bytes LE)
+          if (offset + 4 <= data.length) {
+            const descLen = data.readUInt32LE(offset);
+            offset += 4 + descLen;
+            // Read capabilities vec length
+            if (offset + 4 <= data.length) {
+              const capsLen = data.readUInt32LE(offset);
+              offset += 4;
+              // Each capability is a string (4 byte len + string)
+              for (let i = 0; i < capsLen && offset + 4 <= data.length; i++) {
+                const capLen = data.readUInt32LE(offset);
+                offset += 4 + capLen;
+              }
+              // Next byte should be the verified flag
+              if (offset < data.length) {
+                saidVerified = data[offset] === 1;
+              }
+            }
+          }
+        }
+        console.log(`[report-wallet] On-chain SAID: pda=${saidPda} registered=${saidRegistered} verified=${saidVerified}`);
+      } else {
+        console.log(`[report-wallet] No on-chain SAID account found for ${walletAddress.trim()}`);
+      }
     } catch (e) {
-      console.error('[report-wallet] Failed to derive PDA:', e);
+      console.error('[report-wallet] Failed to query on-chain SAID:', e);
     }
 
     await prisma.agent.update({
@@ -47,10 +94,18 @@ agentRouter.post('/:id/report-wallet', async (req, res) => {
       data: { 
         walletAddress: walletAddress.trim(), 
         ...(saidPda ? { saidPda } : {}),
+        saidRegistered,
+        saidVerified,
       },
     });
 
-    res.json({ ok: true, walletAddress: walletAddress.trim(), saidPda });
+    res.json({ 
+      ok: true, 
+      walletAddress: walletAddress.trim(), 
+      saidPda,
+      saidRegistered,
+      saidVerified,
+    });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed' });
   }

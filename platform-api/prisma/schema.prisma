@@ -62,6 +62,8 @@ model Agent {
   tier                 String   @default("starter")
   walletAddress        String?  @map("wallet_address")
   saidPda              String?  @map("said_pda")
+  saidRegistered       Boolean  @default(false) @map("said_registered")
+  saidVerified         Boolean  @default(false) @map("said_verified")
   saidRegistrationTx   String?  @map("said_registration_tx")
   metaplexAsset        String?  @map("metaplex_asset")
   metaplexUri          String?  @map("metaplex_uri")
