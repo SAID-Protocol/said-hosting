@@ -27,12 +27,31 @@ agentRouter.post('/:id/report-wallet', async (req, res) => {
       return;
     }
 
+    // Derive SAID PDA from wallet address
+    let saidPda: string | null = null;
+    try {
+      const { PublicKey } = await import('@solana/web3.js');
+      const SAID_PROGRAM_ID = new PublicKey('5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G');
+      const walletPubkey = new PublicKey(walletAddress.trim());
+      const [pda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('agent'), walletPubkey.toBuffer()],
+        SAID_PROGRAM_ID
+      );
+      saidPda = pda.toString();
+    } catch (e) {
+      console.error('[report-wallet] Failed to derive PDA:', e);
+    }
+
     await prisma.agent.update({
       where: { id: req.params.id },
-      data: { walletAddress: walletAddress.trim(), saidIdentity: walletAddress.trim() },
+      data: { 
+        walletAddress: walletAddress.trim(), 
+        saidIdentity: walletAddress.trim(),
+        ...(saidPda ? { saidPda } : {}),
+      },
     });
 
-    res.json({ ok: true, walletAddress: walletAddress.trim() });
+    res.json({ ok: true, walletAddress: walletAddress.trim(), saidPda });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed' });
   }
