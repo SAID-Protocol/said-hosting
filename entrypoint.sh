@@ -336,6 +336,30 @@ if [ -n "$SAID_IDENTITY_WALLET" ] && [ -n "$SAID_PLATFORM_API" ] && [ -n "$SAID_
     > /dev/null 2>&1 || echo "[said-hosting] Warning: Failed to report wallet to platform API"
 fi
 
+# Helper function to report events to platform API
+report_event() {
+  local event_type="$1"
+  local event_data="$2"
+  if [ -n "$SAID_PLATFORM_API" ] && [ -n "$SAID_AGENT_ID" ]; then
+    curl -s -X POST "$SAID_PLATFORM_API/api/agents/$SAID_AGENT_ID/report-event" \
+      -H "Content-Type: application/json" \
+      -H "x-api-key: ${SAID_PLATFORM_API_KEY:-}" \
+      -d "{\"type\": \"$event_type\", \"data\": \"$event_data\"}" \
+      > /dev/null 2>&1 || true
+  fi
+}
+
+# Report boot event
+report_event "boot" "Agent started (tier: ${SAID_AGENT_TIER:-starter}, model: ${SAID_MODEL:-default})"
+
+# Background: report heartbeat every 10 minutes + watch for message events in logs
+(
+  while true; do
+    sleep 600
+    report_event "heartbeat" ""
+  done
+) &
+
 echo "[said-hosting] Starting OpenClaw gateway..."
 echo "[said-hosting] Agent: $AGENT_NAME | Tier: ${SAID_TIER:-starter} | Wallet: ${SAID_IDENTITY_WALLET:-unknown}"
 

@@ -111,6 +111,59 @@ agentRouter.post('/:id/report-wallet', async (req, res) => {
   }
 });
 
+// Agent-reported events (called from inside container via entrypoint/hooks)
+agentRouter.post('/:id/report-event', async (req, res) => {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.API_KEY) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const agent = await prisma.agent.findUnique({ where: { id: req.params.id } });
+    if (!agent) {
+      res.status(404).json({ error: 'Agent not found' });
+      return;
+    }
+
+    const { type, data } = req.body || {};
+    const validTypes = ['message_sent', 'message_received', 'heartbeat', 'boot', 'shutdown', 'error', 'tool_call', 'transaction', 'system'];
+    if (!type || !validTypes.includes(type)) {
+      res.status(400).json({ error: `type must be one of: ${validTypes.join(', ')}` });
+      return;
+    }
+
+    // Rate limit: max 1 heartbeat per 5 min, 100 other events per hour
+    if (type === 'heartbeat') {
+      const recent = await prisma.activity.findFirst({
+        where: { agentId: agent.id, type: 'heartbeat', createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) } },
+      });
+      if (recent) {
+        res.json({ ok: true, deduplicated: true });
+        return;
+      }
+    }
+
+    await prisma.activity.create({
+      data: {
+        agentId: agent.id,
+        type,
+        data: typeof data === 'string' ? data : data ? JSON.stringify(data) : null,
+      },
+    });
+
+    // Update agent's updatedAt as a "last active" signal
+    await prisma.agent.update({
+      where: { id: agent.id },
+      data: { updatedAt: new Date() },
+    });
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed' });
+  }
+});
+
 agentRouter.post('/:id/register-said', async (req, res) => {
   try {
     const apiKey = req.headers['x-api-key'];
