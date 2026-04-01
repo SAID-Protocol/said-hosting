@@ -87,7 +87,10 @@ async function buildUsdcTransferTx(
 }
 
 /**
- * Sign and submit a billing transaction via Privy
+ * Sign and submit a billing transaction via Privy SDK
+ * 
+ * Uses privy.wallets().solana.sendTransaction() with authContext
+ * so the authorization key signs on behalf of the user's embedded wallet.
  * 
  * Returns the transaction signature, or null on failure.
  */
@@ -103,52 +106,31 @@ export async function signAndSubmitBillingTx(
       return null;
     }
     
+    console.log(`[privy-billing] Charging $${amountUsd} USDC from wallet ${wallet.walletId} (${wallet.address})`);
+    
     // 2. Build the USDC transfer transaction
     const serializedTx = await buildUsdcTransferTx(wallet.address, amountUsd);
     
-    // 3. Sign and send via Privy API
-    // Using the intents/rpc endpoint with signAndSendTransaction
-    const response = await fetch(`https://api.privy.io/v1/intents/wallets/${wallet.walletId}/rpc`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'privy-app-id': PRIVY_APP_ID,
-        'Authorization': `Basic ${Buffer.from(`${PRIVY_APP_ID}:${PRIVY_APP_SECRET}`).toString('base64')}`,
+    // 3. Sign and send via Privy SDK with authorization context
+    // Uses privy.wallets().rpc() which auto-generates authorization signatures
+    const result = await privy.wallets().rpc(wallet.walletId, {
+      method: 'signAndSendTransaction',
+      caip2: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', // Solana mainnet
+      params: {
+        transaction: serializedTx,
+        encoding: 'base64',
       },
-      body: JSON.stringify({
-        method: 'signAndSendTransaction',
-        params: {
-          transaction: serializedTx,
-          encoding: 'base64',
-        },
-      }),
+      chain_type: 'solana',
+      authorization_context: {
+        authorization_private_keys: [AUTHORIZATION_KEY],
+      },
     });
     
-    if (!response.ok) {
-      const error = await response.text();
-      console.error(`[privy-billing] Privy RPC failed (${response.status}):`, error);
-      return null;
-    }
-    
-    const result = await response.json();
-    
-    // The intent may need authorization signing
-    if (result.status === 'pending_authorization') {
-      console.log(`[privy-billing] Intent ${result.intent_id} pending authorization — needs signer setup`);
-      // TODO: Use authorization context to approve the intent
-      return null;
-    }
-    
-    // Extract tx signature from result
-    const txSignature = result.response?.signature || result.response?.result || null;
-    
-    if (txSignature) {
-      console.log(`[privy-billing] Billing tx submitted: ${txSignature}`);
-    }
-    
-    return txSignature;
+    const hash = (result as any).hash || (result as any).signature || (result as any).data?.hash;
+    console.log(`[privy-billing] Billing tx submitted: ${hash}`);
+    return hash || null;
   } catch (error) {
-    console.error(`[privy-billing] Error:`, error);
+    console.error(`[privy-billing] Billing error:`, error);
     return null;
   }
 }
@@ -190,7 +172,7 @@ async function buildWithdrawalTx(
 }
 
 /**
- * Sign and submit a withdrawal transaction via Privy
+ * Sign and submit a withdrawal transaction via Privy SDK
  * User can withdraw USDC from their embedded wallet to an external address
  */
 export async function signAndSubmitWithdrawalTx(
@@ -206,46 +188,28 @@ export async function signAndSubmitWithdrawalTx(
       return null;
     }
     
+    console.log(`[privy-billing] Withdrawing $${amountUsd} USDC from wallet ${wallet.walletId} to ${toAddress}`);
+    
     // 2. Build the withdrawal transaction
     const serializedTx = await buildWithdrawalTx(wallet.address, toAddress, amountUsd);
     
-    // 3. Sign and send via Privy API
-    const response = await fetch(`https://api.privy.io/v1/intents/wallets/${wallet.walletId}/rpc`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'privy-app-id': PRIVY_APP_ID,
-        'Authorization': `Basic ${Buffer.from(`${PRIVY_APP_ID}:${PRIVY_APP_SECRET}`).toString('base64')}`,
+    // 3. Sign and send via Privy SDK with authorization context
+    const result = await privy.wallets().rpc(wallet.walletId, {
+      method: 'signAndSendTransaction',
+      caip2: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', // Solana mainnet
+      params: {
+        transaction: serializedTx,
+        encoding: 'base64',
       },
-      body: JSON.stringify({
-        method: 'signAndSendTransaction',
-        params: {
-          transaction: serializedTx,
-          encoding: 'base64',
-        },
-      }),
+      chain_type: 'solana',
+      authorization_context: {
+        authorization_private_keys: [AUTHORIZATION_KEY],
+      },
     });
     
-    if (!response.ok) {
-      const error = await response.text();
-      console.error(`[privy-billing] Withdrawal RPC failed (${response.status}):`, error);
-      return null;
-    }
-    
-    const result = await response.json();
-    
-    if (result.status === 'pending_authorization') {
-      console.log(`[privy-billing] Withdrawal intent ${result.intent_id} pending authorization`);
-      return null;
-    }
-    
-    const txSignature = result.response?.signature || result.response?.result || null;
-    
-    if (txSignature) {
-      console.log(`[privy-billing] Withdrawal tx submitted: ${txSignature}`);
-    }
-    
-    return txSignature;
+    const hash = (result as any).hash || (result as any).signature || (result as any).data?.hash;
+    console.log(`[privy-billing] Withdrawal tx submitted: ${hash}`);
+    return hash || null;
   } catch (error) {
     console.error(`[privy-billing] Withdrawal error:`, error);
     return null;
