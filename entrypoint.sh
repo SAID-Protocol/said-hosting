@@ -374,4 +374,25 @@ export OPENCLAW_GATEWAY_PORT=18789
 export NODE_OPTIONS="--max-old-space-size=3072"
 
 # Telegram extension deps pre-installed in Dockerfile — clean startup
-exec node /usr/local/lib/node_modules/openclaw/dist/index.js gateway --port 18789 --bind lan --allow-unconfigured
+# Report Telegram errors & disable after 3 failures
+TG_ERRORS=0
+check_telegram_errors() {
+  if tail -n 30 /tmp/openclaw/openclaw-2026-*.log | grep -q "Call to .* failed! (404:"; then
+    let TG_ERRORS++
+    if [ "$TG_ERRORS" -ge 3 ]; then
+      echo "[said-hosting] Disabling Telegram due to repeated 404 errors"
+      sed -i '/telegram:/,/}/ s/enabled: true/enabled: false/' "$DATA_DIR/openclaw.json"
+      TG_ERRORS=0
+    fi
+  else
+    TG_ERRORS=0
+  fi
+}
+exec node /usr/local/lib/node_modules/openclaw/dist/index.js gateway --port 18789 --bind lan --allow-unconfigured &
+
+# Monitor & check for repeated Telegram errors
+echo "[said-hosting] Monitoring Telegram errors..."
+while true; do
+  sleep 600
+  check_telegram_errors
+done
