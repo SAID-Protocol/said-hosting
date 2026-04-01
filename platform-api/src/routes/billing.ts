@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getBillingInfo, getMonthlyPrice, getWalletUsdcBalance, startTrial, PRICING, buildWithdrawalTransaction, recordPayment, processManualPayment } from '../services/billing';
+import { chargeWallet } from '../services/privy-billing';
 import { prisma } from '../db';
 
 export const billingRouter = Router();
@@ -301,5 +302,36 @@ billingRouter.post('/pay', async (req, res) => {
   } catch (error) {
     console.error('[billing/pay] Error:', error);
     res.status(500).json({ error: error instanceof Error ? error.message : 'Payment processing failed' });
+  }
+});
+
+/**
+ * POST /api/billing/test-charge — Test server-side wallet charge (admin only)
+ */
+billingRouter.post('/test-charge', async (req, res) => {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.API_KEY) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { walletId, walletAddress, amount } = req.body;
+    if (!walletId || !walletAddress || !amount) {
+      res.status(400).json({ error: 'walletId, walletAddress, and amount are required' });
+      return;
+    }
+
+    console.log(`[billing/test-charge] Testing charge of $${amount} from ${walletId}`);
+    const hash = await chargeWallet(walletId, walletAddress, amount);
+
+    if (hash) {
+      res.json({ success: true, hash });
+    } else {
+      res.status(500).json({ error: 'Charge failed — check server logs' });
+    }
+  } catch (error) {
+    console.error('[billing/test-charge] Error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Test charge failed' });
   }
 });
