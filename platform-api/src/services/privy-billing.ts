@@ -87,10 +87,44 @@ async function buildUsdcTransferTx(
 }
 
 /**
- * Sign and submit a billing transaction via Privy SDK
- * 
- * Uses privy.wallets().solana.sendTransaction() with authContext
- * so the authorization key signs on behalf of the user's embedded wallet.
+ * Charge a specific wallet by ID and address directly
+ * No user lookup needed — just walletId + address + amount
+ */
+export async function chargeWallet(
+  walletId: string,
+  walletAddress: string,
+  amountUsd: number,
+): Promise<string | null> {
+  try {
+    console.log(`[privy-billing] Charging $${amountUsd} USDC from wallet ${walletId} (${walletAddress})`);
+    
+    const serializedTx = await buildUsdcTransferTx(walletAddress, amountUsd);
+    
+    const result = await privy.wallets().rpc(walletId, {
+      method: 'signAndSendTransaction',
+      caip2: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      params: {
+        transaction: serializedTx,
+        encoding: 'base64',
+      },
+      chain_type: 'solana',
+      authorization_context: {
+        authorization_private_keys: [AUTHORIZATION_KEY],
+      },
+    });
+    
+    const hash = (result as any).hash || (result as any).signature || (result as any).data?.hash;
+    console.log(`[privy-billing] Charge tx submitted: ${hash}`);
+    return hash || null;
+  } catch (error) {
+    console.error(`[privy-billing] Charge error:`, error);
+    return null;
+  }
+}
+
+/**
+ * Sign and submit a billing transaction via Privy SDK (by user DID)
+ * Looks up the user's wallet, then charges it.
  * 
  * Returns the transaction signature, or null on failure.
  */
