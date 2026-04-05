@@ -112,7 +112,7 @@ app.use('/api/wallet/agents', walletRouter); // Agent wallet signing - auth via 
 // Called by the Protocol API (api.saidprotocol.com) after agent registration
 app.post('/api/internal/mint-nft', async (req, res) => {
   const internalKey = req.headers['x-internal-key'];
-  if (!internalKey || internalKey !== process.env.INTERNAL_API_KEY) {
+  if (!internalKey || internalKey !== process.env.SAID_HOSTING_INTERNAL_KEY) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }

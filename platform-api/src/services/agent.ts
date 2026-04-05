@@ -7,6 +7,7 @@ import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 import { generateWorkspace, WorkspaceConfig } from './workspace';
 import { confirmHostedAgent, fundAgentWallet, getFundingAmountUsdc, registerHostedAgent } from './said';
 import { registerAgentMetaplex } from './metaplex';
+import { createAgentWallet } from './privy-wallets';
 
 function generateId(): string { return crypto.randomUUID(); }
 function shortId(id: string): string { return id.replace(/-/g, '').slice(0, 8); }
@@ -198,6 +199,11 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
       console.log('[createAgent] Set user apiProvider to z-ai for trial');
     }
 
+    // Create Privy wallet for the agent (prevents key exposure in config/filesystem)
+    console.log('[createAgent] Creating Privy wallet for agent...');
+    const privyWallet = await createAgentWallet();
+    console.log(`[createAgent] Privy wallet created: ${privyWallet.walletId} (${privyWallet.address})`);
+
     // Create DB record FIRST so bootstrap can find it when container starts
     const agent = await prisma.agent.create({
       data: {
@@ -205,6 +211,8 @@ export async function createAgent(userId: string, payload: CreateAgentRequest) {
         name: payload.name.trim(),
         status: 'creating',
         tier,
+        walletAddress: privyWallet.address,
+        privyWalletId: privyWallet.walletId,
         programMd: payload.program_md ?? null,
         config: payload.config ? JSON.stringify(payload.config) : null,
         gatewayTokenHash,

@@ -61,6 +61,7 @@ model Agent {
   status               String   @default("creating")
   tier                 String   @default("starter")
   walletAddress        String?  @map("wallet_address")
+  privyWalletId        String?  @map("privy_wallet_id")
   saidPda              String?  @map("said_pda")
   saidRegistered       Boolean  @default(false) @map("said_registered")
   saidVerified         Boolean  @default(false) @map("said_verified")
