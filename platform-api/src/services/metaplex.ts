@@ -45,6 +45,7 @@ export interface AgentMetadata {
   capabilities?: string[];
   tier: string;
   flyAppName?: string;
+  ownerAddress?: string; // If set, NFT is owned by this address instead of the platform wallet
 }
 
 /**
@@ -197,6 +198,7 @@ export async function registerAgentMetaplex(metadata: AgentMetadata): Promise<Me
       name: metadata.name,
       uri: registrationUri,
       ...(collection ? { collection } : {}),
+      ...(metadata.ownerAddress ? { owner: umiPublicKey(metadata.ownerAddress) } : {}),
     }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } });
 
     console.log(`[metaplex] Created MPL Core asset: ${asset.publicKey}`);

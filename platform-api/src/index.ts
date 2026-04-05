@@ -7,6 +7,7 @@ import { agentRouter } from './routes/agents';
 import { billingRouter } from './routes/billing';
 import { balanceRouter } from './routes/balance';
 import { aiProxyRouter } from './routes/ai-proxy';
+import walletRouter from './routes/wallet';
 import { runBillingCron } from './services/billing';
 import { authMiddleware } from './middleware/auth';
 
@@ -105,6 +106,50 @@ app.use('/api/agents', authMiddleware, agentCreateLimiter, agentRouter);
 app.use('/api/billing', authMiddleware, billingLimiter, billingRouter);
 app.use('/api/balance', balanceRouter); // Public endpoint - no auth needed
 app.use('/api/ai-proxy', aiProxyRouter); // AI proxy for trial agents - auth via x-agent-id header
+app.use('/api/wallet/agents', walletRouter); // Agent wallet signing - auth via X-Gateway-Token header
+
+// ── Internal endpoint: mint NFT for partner-provisioned agents ──
+// Called by the Protocol API (api.saidprotocol.com) after agent registration
+app.post('/api/internal/mint-nft', async (req, res) => {
+  const internalKey = req.headers['x-internal-key'];
+  if (!internalKey || internalKey !== process.env.INTERNAL_API_KEY) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const { walletAddress, name, description, capabilities, tier, ownerAddress } = req.body;
+
+  if (!walletAddress || !name) {
+    res.status(400).json({ error: 'Required: walletAddress, name' });
+    return;
+  }
+
+  try {
+    const { registerAgentMetaplex } = await import('./services/metaplex');
+    const result = await registerAgentMetaplex({
+      name,
+      description: description || `${name} - Partner AI Agent`,
+      walletAddress,
+      capabilities: capabilities || ['payments', 'x402'],
+      tier: tier || 'partner',
+      ownerAddress: ownerAddress || walletAddress, // Default: agent owns their NFT
+    });
+
+    if (result.success) {
+      console.log(`[internal] Minted NFT for ${walletAddress}: ${result.assetAddress}`);
+      res.json({
+        success: true,
+        nft_address: result.assetAddress,
+        registration_uri: result.registrationUri,
+      });
+    } else {
+      res.status(500).json({ error: 'NFT minting failed', details: result });
+    }
+  } catch (error: any) {
+    console.error('[internal] NFT mint error:', error);
+    res.status(500).json({ error: 'NFT minting failed', details: error.message });
+  }
+});
 
 async function start() {
   await initDb();
