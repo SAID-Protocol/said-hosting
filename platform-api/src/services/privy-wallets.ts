@@ -33,7 +33,7 @@ export async function createAgentWallet(): Promise<{ walletId: string; address: 
   try {
     console.log('[privy-wallets] Creating new Solana wallet...');
     
-    const result = await privy.wallets().create({
+    const result = await (privy as any).wallets().create({
       chain_type: 'solana',
       authorization_context: authContext,
     });
