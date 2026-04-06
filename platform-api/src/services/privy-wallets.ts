@@ -10,20 +10,12 @@
  */
 
 import { PrivyClient } from '@privy-io/node';
-import type { AuthorizationContext } from '@privy-io/node';
 
 const PRIVY_APP_ID = 'cmlbxd3qu00jqi80c4pibohzv';
 const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET || '';
-const AUTHORIZATION_KEY = process.env.PRIVY_AUTHORIZATION_KEY || '';
-const AUTHORIZATION_KEY_ID = process.env.PRIVY_AUTHORIZATION_KEY_ID || '';
 
 // Initialize Privy client
 const privy = new PrivyClient({ appId: PRIVY_APP_ID, appSecret: PRIVY_APP_SECRET });
-
-// Authorization context for wallet operations
-const authContext: AuthorizationContext = {
-  authorization_private_keys: [AUTHORIZATION_KEY],
-};
 
 /**
  * Create a new Privy wallet for an agent (Solana mainnet)
@@ -35,7 +27,6 @@ export async function createAgentWallet(): Promise<{ walletId: string; address: 
     
     const result = await (privy as any).wallets().create({
       chain_type: 'solana',
-      authorization_context: authContext,
     });
     
     const walletId = (result as any).id;
@@ -68,16 +59,12 @@ export async function signTransaction(
   try {
     console.log(`[privy-wallets] Signing transaction with wallet ${walletId}`);
     
-    const result = await privy.wallets().rpc(walletId, {
+    const result = await (privy as any).wallets().rpc(walletId, {
       method: 'signAndSendTransaction',
-      caip2: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', // Solana mainnet
+      caip2: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
       params: {
         transaction,
         encoding: 'base64',
-      },
-      chain_type: 'solana',
-      authorization_context: {
-        authorization_private_keys: [AUTHORIZATION_KEY],
       },
     });
     
@@ -109,16 +96,12 @@ export async function signTransactionOnly(
   try {
     console.log(`[privy-wallets] Signing transaction (no send) with wallet ${walletId}`);
     
-    const result = await privy.wallets().rpc(walletId, {
+    const result = await (privy as any).wallets().rpc(walletId, {
       method: 'signTransaction',
       caip2: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
       params: {
         transaction,
         encoding: 'base64',
-      },
-      chain_type: 'solana',
-      authorization_context: {
-        authorization_private_keys: [AUTHORIZATION_KEY],
       },
     });
     
