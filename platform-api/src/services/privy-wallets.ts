@@ -137,16 +137,12 @@ export async function signTransactionOnly(
   try {
     console.log(`[privy-wallets] Signing transaction (no send) with wallet ${walletId}`);
     
-    const result = await (privy as any).wallets().rpc(walletId, {
-      method: 'signTransaction',
-      caip2: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
-      params: {
-        transaction,
-        encoding: 'base64',
-      },
+    // Use the newer Privy SDK method: wallets().solana().signTransaction()
+    const result = await (privy as any).wallets().solana().signTransaction(walletId, {
+      transaction,
     });
     
-    const signedTx = (result as any).signedTransaction || (result as any).data?.signedTransaction;
+    const signedTx = result?.signed_transaction || result?.signedTransaction;
     
     if (!signedTx) {
       throw new Error('Privy signing failed - no signed transaction returned');
