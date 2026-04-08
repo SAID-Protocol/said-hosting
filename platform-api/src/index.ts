@@ -8,6 +8,7 @@ import { billingRouter } from './routes/billing';
 import { balanceRouter } from './routes/balance';
 import { aiProxyRouter } from './routes/ai-proxy';
 import walletRouter from './routes/wallet';
+import { butlerRouter } from './routes/butler';
 import { runBillingCron } from './services/billing';
 import { authMiddleware } from './middleware/auth';
 
@@ -107,6 +108,7 @@ app.use('/api/billing', authMiddleware, billingLimiter, billingRouter);
 app.use('/api/balance', balanceRouter); // Public endpoint - no auth needed
 app.use('/api/ai-proxy', aiProxyRouter); // AI proxy for trial agents - auth via x-agent-id header
 app.use('/api/wallet/agents', walletRouter); // Agent wallet signing - auth via X-Gateway-Token header
+app.use('/api/butler', butlerRouter); // Butler user provisioning - auth via x-api-key
 
 // ── Internal endpoint: mint NFT for partner-provisioned agents ──
 // Called by the Protocol API (api.saidprotocol.com) after agent registration

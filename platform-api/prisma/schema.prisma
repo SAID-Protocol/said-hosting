@@ -103,3 +103,23 @@ model Activity {
 
   @@map("activity")
 }
+
+/// Butler-provisioned user identities (lightweight — no container, no OpenRouter key)
+model ButlerUser {
+  id              String    @id @default(uuid())
+  externalId      String    @unique @map("external_id")   // e.g. "tg_123456789"
+  platform        String                                    // "telegram", "discord", etc.
+  displayName     String?   @map("display_name")           // user-chosen nickname for their agent
+  walletAddress   String?   @map("wallet_address")         // Privy wallet address
+  privyWalletId   String?   @map("privy_wallet_id")        // Privy wallet ID for signing
+  saidPda         String?   @map("said_pda")               // On-chain SAID PDA
+  saidRegistered  Boolean   @default(false) @map("said_registered")
+  saidVerified    Boolean   @default(false) @map("said_verified")
+  registrationTx  String?   @map("registration_tx")        // Unsigned tx (pending confirm)
+  verificationTx  String?   @map("verification_tx")
+  metaplexAsset   String?   @map("metaplex_asset")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("butler_users")
+}
