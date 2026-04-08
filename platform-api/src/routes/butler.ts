@@ -134,7 +134,7 @@ butlerRouter.post('/register-said', async (req, res) => {
       data: { displayName: displayName.trim() },
     });
 
-    // Phase 1: Get unsigned registration tx from Protocol API
+    // Get unsigned registration tx from Protocol API
     const registration = await registerHostedAgent({
       wallet: user.walletAddress,
       name: displayName.trim(),
@@ -147,18 +147,11 @@ butlerRouter.post('/register-said', async (req, res) => {
       return;
     }
 
-    // Store unsigned tx + PDA
-    await prisma.butlerUser.update({
-      where: { externalId },
-      data: {
-        registrationTx: registration.unsignedTransaction,
-        saidPda: registration.pda,
-      },
-    });
-
-    // Phase 2: Sign with Privy wallet and confirm
+    // Sign with Privy wallet AND send the transaction immediately
     const signature = await privySign(user.privyWalletId, registration.unsignedTransaction);
 
+    // Privy's signAndSendTransaction returns the tx signature
+    // We need to confirm on-chain status via the Protocol API
     const confirmation = await confirmHostedAgent({
       signedTransaction: signature,
       wallet: user.walletAddress,
@@ -178,7 +171,7 @@ butlerRouter.post('/register-said', async (req, res) => {
       data: {
         saidPda: confirmation.saidPda || registration.pda,
         saidRegistered: true,
-        registrationTx: null, // Clear pending tx
+        registrationTx: null,
       },
     });
 
