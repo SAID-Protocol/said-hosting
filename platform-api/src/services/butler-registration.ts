@@ -22,7 +22,7 @@ import {
   LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
 import bs58 from 'bs58';
-import { signTransaction } from './privy-wallets';
+import { signTransactionOnly } from './privy-wallets';
 
 const SAID_PROGRAM_ID = new PublicKey('5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G');
 const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
@@ -159,8 +159,21 @@ export async function registerButlerUser(
     verifySignatures: false,
   }).toString('base64');
 
-  // Step 8: Privy signs and broadcasts
-  const txSignature = await signTransaction(privyWalletId, serializedTx);
+  // Step 8: Privy signs (does NOT broadcast — we handle that)
+  const signedTxBase64 = await signTransactionOnly(privyWalletId, serializedTx);
+
+  // Step 8b: Broadcast the fully-signed transaction ourselves
+  const signedTxBuffer = Buffer.from(signedTxBase64, 'base64');
+  const txSignature = await connection.sendRawTransaction(signedTxBuffer, {
+    skipPreflight: false,
+    maxRetries: 3,
+  });
+
+  // Wait for confirmation
+  await connection.confirmTransaction(
+    { signature: txSignature, blockhash, lastValidBlockHeight },
+    'confirmed',
+  );
 
   console.log(`[butler-reg] Registered+verified ON-CHAIN: ${walletAddress}, PDA=${pda.toString()}, tx=${txSignature}`);
 
