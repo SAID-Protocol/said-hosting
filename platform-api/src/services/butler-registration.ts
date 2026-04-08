@@ -200,7 +200,7 @@ export async function registerButlerUser(
     txSignature,
     walletAddress,
     metadataUri,
-    profile: `https://www.saidprotocol.com/agent.html?wallet=${walletAddress}`,
+    profile: `https://www.saidprotocol.com/agents/${walletAddress}`,
     badge: `https://api.saidprotocol.com/api/badge/${walletAddress}.svg`,
   };
 }
