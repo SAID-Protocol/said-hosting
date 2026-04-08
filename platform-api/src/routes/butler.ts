@@ -148,16 +148,27 @@ butlerRouter.post('/register-said', async (req, res) => {
 
     const registerData = await registerRes.json() as any;
 
-    if (!registerRes.ok || !registerData.success || !registerData.unsignedTransaction) {
-      res.status(500).json({ error: registerData.error || 'SAID registration failed' });
+    // The register endpoint returns { transaction } not { unsignedTransaction }
+    const unsignedTx = registerData.unsignedTransaction || registerData.transaction;
+
+    if (!registerRes.ok || !registerData.success || !unsignedTx) {
+      console.error(`[butler] Protocol API register failed:`, JSON.stringify(registerData));
+      res.status(500).json({ error: registerData.error || registerData.message || 'SAID registration failed' });
       return;
     }
 
-    console.log(`[butler] Got unsigned registration tx for ${externalId}, signing...`);
+    console.log(`[butler] Got unsigned registration tx for ${externalId}, PDA=${registerData.pda}, signing immediately...`);
 
     // Phase 2: Sign and broadcast with Privy wallet IMMEDIATELY
     // signTransaction uses signAndSendTransaction, so it broadcasts automatically
-    const txSignature = await signTransaction(user.privyWalletId, registerData.unsignedTransaction);
+    let txSignature: string;
+    try {
+      txSignature = await signTransaction(user.privyWalletId, unsignedTx);
+    } catch (signError: any) {
+      console.error(`[butler] Privy sign+send failed for ${externalId}:`, signError.message || signError);
+      res.status(500).json({ error: `Transaction signing failed: ${signError.message || 'unknown error'}` });
+      return;
+    }
 
     console.log(`[butler] Registered ON-CHAIN for ${externalId}: tx=${txSignature}, PDA=${registerData.pda}`);
 
