@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../db';
-import { createAgentWallet, signTransaction as privySign } from '../services/privy-wallets';
-import { registerHostedAgent, confirmHostedAgent } from '../services/said';
+import { createAgentWallet } from '../services/privy-wallets';
 
 export const butlerRouter = Router();
 
@@ -128,61 +127,48 @@ butlerRouter.post('/register-said', async (req, res) => {
       return;
     }
 
-    // Update display name
-    await prisma.butlerUser.update({
-      where: { externalId },
-      data: { displayName: displayName.trim() },
+    // Register via Protocol API's pending endpoint (off-chain, free, instant)
+    // No SOL needed, no signature needed — just creates the directory entry + PDA
+    const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+    const pendingRes = await fetch(`${SAID_API}/api/register/pending`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        wallet: user.walletAddress,
+        name: displayName.trim(),
+        description: `${displayName.trim()} — SAID Butler agent for ${user.platform}`,
+        capabilities: ['messaging', 'assistant'],
+        source: 'butler',
+      }),
     });
 
-    // Get unsigned registration tx from Protocol API
-    const registration = await registerHostedAgent({
-      wallet: user.walletAddress,
-      name: displayName.trim(),
-      description: `Butler-provisioned agent for ${user.platform} user ${externalId}`,
-      capabilities: ['messaging'],
-    });
+    const pendingData = await pendingRes.json() as any;
 
-    if (!registration.success || !registration.unsignedTransaction) {
-      res.status(500).json({ error: registration.error || 'SAID registration failed' });
+    if (!pendingRes.ok || !pendingData.success) {
+      res.status(500).json({ error: pendingData.error || 'SAID registration failed' });
       return;
     }
 
-    // Sign with Privy wallet AND send the transaction immediately
-    const signature = await privySign(user.privyWalletId, registration.unsignedTransaction);
-
-    // Privy's signAndSendTransaction returns the tx signature
-    // We need to confirm on-chain status via the Protocol API
-    const confirmation = await confirmHostedAgent({
-      signedTransaction: signature,
-      wallet: user.walletAddress,
-      name: displayName.trim(),
-      description: `Butler-provisioned agent for ${user.platform} user ${externalId}`,
-      capabilities: ['messaging'],
-    });
-
-    if (!confirmation.success) {
-      res.status(500).json({ error: confirmation.error || 'SAID confirmation failed' });
-      return;
-    }
-
-    // Update DB with confirmed registration
+    // Update DB with registration
     const updated = await prisma.butlerUser.update({
       where: { externalId },
       data: {
-        saidPda: confirmation.saidPda || registration.pda,
+        displayName: displayName.trim(),
+        saidPda: pendingData.pda,
         saidRegistered: true,
-        registrationTx: null,
       },
     });
 
-    console.log(`[butler] Registered SAID for ${externalId}: PDA=${updated.saidPda}`);
+    console.log(`[butler] Registered SAID for ${externalId}: PDA=${updated.saidPda}, status=PENDING`);
 
     res.json({
       success: true,
       saidPda: updated.saidPda,
       walletAddress: user.walletAddress,
       displayName: displayName.trim(),
-      signature: confirmation.signature,
+      status: 'PENDING',
+      profile: pendingData.profile,
+      badge: pendingData.badge,
     });
   } catch (error) {
     console.error('[butler] Register SAID error:', error);
