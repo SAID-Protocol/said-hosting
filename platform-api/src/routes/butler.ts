@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../db';
-import { createAgentWallet, signMessage } from '../services/privy-wallets';
+import { createAgentWallet, signMessage, signTransaction } from '../services/privy-wallets';
 
 export const butlerRouter = Router();
 
@@ -128,96 +128,60 @@ butlerRouter.post('/register-said', async (req, res) => {
     }
 
     const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+    const SAID_PLATFORM_KEY = process.env.SAID_HOSTING_API_KEY || '';
     const trimmedName = displayName.trim();
-    const timestamp = Date.now();
 
-    // Build the registration message (must match Protocol API's format)
-    const registrationMessage = `SAID:register:${user.walletAddress}:${trimmedName}:${timestamp}`;
-
-    // Sign the message with the user's Privy wallet
-    const signature = await signMessage(user.privyWalletId, registrationMessage);
-
-    console.log(`[butler] Signed registration message for ${externalId}`);
-
-    // Call sponsored registration — this does ACTUAL on-chain registration
-    // The sponsor wallet pays the rent, user's wallet signs the message
-    const sponsoredRes = await fetch(`${SAID_API}/api/register/sponsored`, {
+    // Phase 1: Get unsigned transaction from said-hosting platform endpoint
+    const registerRes = await fetch(`${SAID_API}/api/platforms/said-hosting/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Platform-Key': SAID_PLATFORM_KEY,
+      },
       body: JSON.stringify({
         wallet: user.walletAddress,
         name: trimmedName,
         description: `${trimmedName} — SAID Butler agent for ${user.platform}`,
-        signature,
-        timestamp,
         capabilities: ['messaging', 'assistant'],
-        source: 'butler',
       }),
     });
 
-    const sponsoredData = await sponsoredRes.json() as any;
+    const registerData = await registerRes.json() as any;
 
-    if (!sponsoredRes.ok || !sponsoredData.success) {
-      // Fall back to pending registration if sponsored fails
-      console.warn(`[butler] Sponsored registration failed for ${externalId}: ${sponsoredData.error || sponsoredRes.status}`);
-      console.warn(`[butler] Falling back to pending registration`);
-
-      const pendingRes = await fetch(`${SAID_API}/api/register/pending`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wallet: user.walletAddress,
-          name: trimmedName,
-          description: `${trimmedName} — SAID Butler agent for ${user.platform}`,
-          capabilities: ['messaging', 'assistant'],
-          source: 'butler',
-        }),
-      });
-
-      const pendingData = await pendingRes.json() as any;
-
-      const updated = await prisma.butlerUser.update({
-        where: { externalId },
-        data: {
-          displayName: trimmedName,
-          saidPda: pendingData.pda || null,
-          saidRegistered: true,
-        },
-      });
-
-      res.json({
-        success: true,
-        saidPda: updated.saidPda,
-        walletAddress: user.walletAddress,
-        displayName: trimmedName,
-        status: 'PENDING',
-        profile: pendingData.profile,
-        onChain: false,
-      });
+    if (!registerRes.ok || !registerData.success || !registerData.unsignedTransaction) {
+      res.status(500).json({ error: registerData.error || 'SAID registration failed' });
       return;
     }
 
-    // Sponsored registration succeeded — agent is ON-CHAIN
+    console.log(`[butler] Got unsigned registration tx for ${externalId}, signing...`);
+
+    // Phase 2: Sign and broadcast with Privy wallet IMMEDIATELY
+    // signTransaction uses signAndSendTransaction, so it broadcasts automatically
+    const txSignature = await signTransaction(user.privyWalletId, registerData.unsignedTransaction);
+
+    console.log(`[butler] Registered ON-CHAIN for ${externalId}: tx=${txSignature}, PDA=${registerData.pda}`);
+
+    // Update DB
     const updated = await prisma.butlerUser.update({
       where: { externalId },
       data: {
         displayName: trimmedName,
-        saidPda: sponsoredData.pda,
+        saidPda: registerData.pda,
         saidRegistered: true,
+        saidVerified: true, // The tx includes both register + verify
       },
     });
-
-    console.log(`[butler] Registered SAID ON-CHAIN for ${externalId}: PDA=${updated.saidPda}`);
 
     res.json({
       success: true,
       saidPda: updated.saidPda,
       walletAddress: user.walletAddress,
       displayName: trimmedName,
-      status: 'REGISTERED',
-      profile: sponsoredData.profile,
-      badge: sponsoredData.badge,
+      status: 'VERIFIED',
+      profile: registerData.profile || `https://www.saidprotocol.com/agent.html?wallet=${user.walletAddress}`,
+      badge: `https://api.saidprotocol.com/api/badge/${user.walletAddress}.svg`,
       onChain: true,
+      txSignature,
     });
   } catch (error) {
     console.error('[butler] Register SAID error:', error);
