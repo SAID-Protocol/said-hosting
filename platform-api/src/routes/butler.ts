@@ -117,16 +117,18 @@ butlerRouter.post('/register-said', async (req, res) => {
       res.status(400).json({ error: 'User wallet not provisioned' });
       return;
     }
-    if (user.saidRegistered) {
+    if (user.saidRegistered && user.saidVerified) {
       res.json({
         success: true,
         saidPda: user.saidPda,
         walletAddress: user.walletAddress,
         displayName: user.displayName,
         alreadyRegistered: true,
+        status: 'VERIFIED',
       });
       return;
     }
+    // If registered but NOT verified (e.g. old off-chain flow), re-run on-chain
 
     const trimmedName = displayName.trim();
 
