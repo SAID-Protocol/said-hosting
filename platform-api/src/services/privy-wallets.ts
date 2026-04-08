@@ -83,6 +83,47 @@ export async function signTransaction(
 }
 
 /**
+ * Sign an arbitrary message with an agent's Privy wallet (Solana)
+ * Used for SAID Protocol registration signatures.
+ * 
+ * @param walletId - The Privy wallet ID
+ * @param message - UTF-8 message string to sign
+ * @returns Base58-encoded signature
+ */
+export async function signMessage(
+  walletId: string,
+  message: string,
+): Promise<string> {
+  try {
+    console.log(`[privy-wallets] Signing message with wallet ${walletId}`);
+    
+    // Encode message as base64 for Privy RPC
+    const messageBase64 = Buffer.from(message, 'utf8').toString('base64');
+    
+    const result = await (privy as any).wallets().rpc(walletId, {
+      method: 'signMessage',
+      caip2: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      params: {
+        message: messageBase64,
+        encoding: 'base64',
+      },
+    });
+    
+    const signature = (result as any).signature || (result as any).data?.signature;
+    
+    if (!signature) {
+      throw new Error('Privy message signing failed - no signature returned');
+    }
+    
+    console.log(`[privy-wallets] Message signed successfully`);
+    return signature;
+  } catch (error) {
+    console.error(`[privy-wallets] Message signing error:`, error);
+    throw error;
+  }
+}
+
+/**
  * Sign a transaction without sending it (for agents that want to submit themselves)
  * 
  * @param walletId - The Privy wallet ID
