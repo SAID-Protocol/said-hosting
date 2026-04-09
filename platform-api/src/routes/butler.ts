@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { prisma } from '../db';
 import { createAgentWallet } from '../services/privy-wallets';
-import { registerButlerUser } from '../services/butler-registration';
+import { registerAgent, verifyAgent } from '../services/butler-registration';
 
 export const butlerRouter = Router();
 
 /**
  * All butler endpoints are API-key authed (called from inside agent containers).
- * These are lightweight — they create wallets and DB records but NO containers.
+ * These provision AGENTS (not user identities) — each user gets their own agent
+ * with its own wallet and on-chain SAID identity.
  */
 function requireApiKey(req: any, res: any, next: any) {
   const apiKey = req.headers['x-api-key'];
@@ -21,7 +22,7 @@ function requireApiKey(req: any, res: any, next: any) {
 butlerRouter.use(requireApiKey);
 
 /**
- * Step 1: Provision a new user identity
+ * Step 1: Provision a new agent
  * Creates Privy wallet + DB record. No on-chain registration yet.
  *
  * POST /api/butler/provision
@@ -41,7 +42,7 @@ butlerRouter.post('/provision', async (req, res) => {
       return;
     }
 
-    // Idempotent: if user already exists, return existing record
+    // Idempotent: if agent already exists, return existing record
     const existing = await prisma.butlerUser.findUnique({ where: { externalId } });
     if (existing) {
       res.json({
@@ -57,9 +58,9 @@ butlerRouter.post('/provision', async (req, res) => {
       return;
     }
 
-    // Create Privy wallet
+    // Create Privy wallet for the agent
     const { walletId, address } = await createAgentWallet();
-    console.log(`[butler] Provisioned wallet ${address} for ${externalId}`);
+    console.log(`[butler] Provisioned agent wallet ${address} for ${externalId}`);
 
     // Create DB record
     const user = await prisma.butlerUser.create({
@@ -88,12 +89,13 @@ butlerRouter.post('/provision', async (req, res) => {
 });
 
 /**
- * Step 2: Register SAID identity on-chain (sponsored — we pay gas)
- * User must be provisioned first. Requires a display name (the nickname).
+ * Step 2: Register agent on-chain (sponsored — we pay gas + rent, costs dust)
+ * Agent appears in SAID directory as REGISTERED.
+ * Does NOT verify — verification happens when user funds the agent.
  *
  * POST /api/butler/register-said
  * Body: { externalId: "tg_123456789", displayName: "My Cool Agent" }
- * Returns: { success, saidPda, signature, walletAddress }
+ * Returns: { success, saidPda, txSignature, walletAddress, profile }
  */
 butlerRouter.post('/register-said', async (req, res) => {
   try {
@@ -104,37 +106,39 @@ butlerRouter.post('/register-said', async (req, res) => {
       return;
     }
     if (!displayName || typeof displayName !== 'string' || !displayName.trim()) {
-      res.status(400).json({ error: 'displayName is required (the agent nickname)' });
+      res.status(400).json({ error: 'displayName is required (the agent name)' });
       return;
     }
 
     const user = await prisma.butlerUser.findUnique({ where: { externalId } });
     if (!user) {
-      res.status(404).json({ error: 'User not found — call /provision first' });
+      res.status(404).json({ error: 'Agent not found — call /provision first' });
       return;
     }
     if (!user.walletAddress || !user.privyWalletId) {
-      res.status(400).json({ error: 'User wallet not provisioned' });
+      res.status(400).json({ error: 'Agent wallet not provisioned' });
       return;
     }
-    if (user.saidRegistered && user.saidVerified) {
+
+    // Already fully registered on-chain
+    if (user.saidRegistered && user.saidPda) {
       res.json({
         success: true,
         saidPda: user.saidPda,
         walletAddress: user.walletAddress,
         displayName: user.displayName,
+        saidRegistered: true,
+        saidVerified: user.saidVerified,
         alreadyRegistered: true,
-        status: 'VERIFIED',
+        profile: `https://www.saidprotocol.com/agents/${user.walletAddress}`,
       });
       return;
     }
-    // If registered but NOT verified (e.g. old off-chain flow), re-run on-chain
 
     const trimmedName = displayName.trim();
 
-    // Build, sign, and broadcast the registration transaction locally
-    // This builds the tx with a FRESH blockhash to avoid expiry issues
-    const result = await registerButlerUser(
+    // Register on-chain (sponsored, dust cost)
+    const result = await registerAgent(
       user.walletAddress,
       user.privyWalletId,
       trimmedName,
@@ -142,25 +146,25 @@ butlerRouter.post('/register-said', async (req, res) => {
       externalId,
     );
 
-    // Update DB
-    const updated = await prisma.butlerUser.update({
+    // Update DB — registered but NOT verified
+    await prisma.butlerUser.update({
       where: { externalId },
       data: {
         displayName: trimmedName,
         saidPda: result.pda,
         saidRegistered: true,
-        saidVerified: true,
+        saidVerified: false, // Verification requires funding
       },
     });
 
-    console.log(`[butler] Registered+verified ON-CHAIN for ${externalId}: PDA=${updated.saidPda}`);
+    console.log(`[butler] Registered ON-CHAIN for ${externalId}: PDA=${result.pda}`);
 
     res.json({
       success: true,
-      saidPda: updated.saidPda,
+      saidPda: result.pda,
       walletAddress: user.walletAddress,
       displayName: trimmedName,
-      status: 'VERIFIED',
+      status: 'REGISTERED',
       profile: result.profile,
       badge: result.badge,
       onChain: true,
@@ -173,10 +177,86 @@ butlerRouter.post('/register-said', async (req, res) => {
 });
 
 /**
- * Check if a butler user exists
+ * Step 3: Verify agent on-chain (paid from agent wallet, ~0.013 SOL)
+ * Triggered by deposit monitor when user funds the agent.
+ * Sends get_verified tx + mints Metaplex NFT.
+ *
+ * POST /api/butler/verify-said
+ * Body: { externalId: "tg_123456789" }
+ * Returns: { success, verifyTxSignature, nftMinted }
+ */
+butlerRouter.post('/verify-said', async (req, res) => {
+  try {
+    const { externalId } = req.body || {};
+
+    if (!externalId || typeof externalId !== 'string') {
+      res.status(400).json({ error: 'externalId is required' });
+      return;
+    }
+
+    const user = await prisma.butlerUser.findUnique({ where: { externalId } });
+    if (!user) {
+      res.status(404).json({ error: 'Agent not found' });
+      return;
+    }
+    if (!user.saidRegistered) {
+      res.status(400).json({ error: 'Agent must be registered before verification' });
+      return;
+    }
+    if (user.saidVerified) {
+      res.json({
+        success: true,
+        walletAddress: user.walletAddress,
+        alreadyVerified: true,
+        status: 'VERIFIED',
+      });
+      return;
+    }
+    if (!user.walletAddress || !user.privyWalletId) {
+      res.status(400).json({ error: 'Agent wallet not provisioned' });
+      return;
+    }
+
+    // Verify on-chain (agent wallet pays ~0.013 SOL)
+    const result = await verifyAgent(
+      user.walletAddress,
+      user.privyWalletId,
+      user.displayName || 'SAID Agent',
+      user.platform,
+    );
+
+    // Update DB
+    await prisma.butlerUser.update({
+      where: { externalId },
+      data: {
+        saidVerified: true,
+        verificationTx: result.verifyTxSignature,
+      },
+    });
+
+    console.log(`[butler] Verified ON-CHAIN for ${externalId}: tx=${result.verifyTxSignature}`);
+
+    res.json({
+      success: true,
+      walletAddress: user.walletAddress,
+      saidPda: user.saidPda,
+      status: 'VERIFIED',
+      verifyTxSignature: result.verifyTxSignature,
+      nftMinted: result.nftMinted,
+      profile: result.profile,
+      badge: result.badge,
+    });
+  } catch (error) {
+    console.error('[butler] Verify SAID error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Verification failed' });
+  }
+});
+
+/**
+ * Check if an agent exists
  *
  * GET /api/butler/user/:externalId
- * Returns: user record or 404
+ * Returns: agent record or { exists: false }
  */
 butlerRouter.get('/user/:externalId', async (req, res) => {
   try {
@@ -206,7 +286,7 @@ butlerRouter.get('/user/:externalId', async (req, res) => {
 });
 
 /**
- * List all butler users (admin/stats)
+ * List all agents (admin/stats)
  *
  * GET /api/butler/users?limit=50&offset=0
  */

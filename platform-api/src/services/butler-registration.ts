@@ -1,15 +1,21 @@
 /**
  * Butler Registration Service
  * 
- * Builds and submits sponsored SAID registration transactions directly,
- * bypassing the Protocol API's two-phase flow (which has blockhash expiry issues).
+ * Two separate on-chain operations:
  * 
- * Flow:
- * 1. Store agent card on Protocol API (for metadata URI)
- * 2. Build register_agent + get_verified instructions locally
- * 3. Build transaction with fresh blockhash
- * 4. Sponsor partial signs (fee payer + funding transfer)
- * 5. Privy signs (agent wallet) and broadcasts
+ * 1. registerAgent() — Sponsored by us (costs dust ~0.002 SOL)
+ *    - Stores agent card on Protocol API
+ *    - Builds register_agent instruction
+ *    - Sponsor pays gas + rent, Privy signs as agent
+ *    - Agent shows in directory as REGISTERED
+ * 
+ * 2. verifyAgent() — Paid from agent's own wallet (~0.013 SOL total)
+ *    - Builds get_verified instruction (0.01 SOL → treasury)
+ *    - Mints Metaplex NFT (~0.003 SOL)
+ *    - Agent wallet pays everything
+ *    - Agent upgrades to VERIFIED + gets NFT
+ * 
+ * Triggered by deposit monitor when user funds the agent wallet.
  */
 
 import {
@@ -39,49 +45,35 @@ function getSponsorKeypair(): Keypair {
   return Keypair.fromSecretKey(bs58.decode(encoded));
 }
 
-interface RegistrationResult {
-  success: boolean;
-  pda: string;
-  txSignature: string;
-  walletAddress: string;
-  metadataUri: string;
-  profile: string;
-  badge: string;
-  error?: string;
-}
-
-export async function registerButlerUser(
-  walletAddress: string,
-  privyWalletId: string,
-  displayName: string,
-  platform: string,
-  externalId: string,
-): Promise<RegistrationResult> {
-  const agentPubkey = new PublicKey(walletAddress);
-  const sponsor = getSponsorKeypair();
-
-  // Compute PDA
-  const [pda] = PublicKey.findProgramAddressSync(
+function computePda(agentPubkey: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
     [Buffer.from('agent'), agentPubkey.toBuffer()],
     SAID_PROGRAM_ID,
   );
+}
 
-  // Treasury PDA
-  const [treasuryPda] = PublicKey.findProgramAddressSync(
+function computeTreasuryPda(): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
     [Buffer.from('treasury')],
     SAID_PROGRAM_ID,
   );
+}
 
-  const metadataUri = `https://api.saidprotocol.com/api/cards/${walletAddress}.json`;
+// ─── Store agent card on Protocol API ───────────────────────────────────────
 
-  // Step 1: Store agent card on Protocol API
+async function storeAgentCard(
+  walletAddress: string,
+  displayName: string,
+  platform: string,
+  verified: boolean = false,
+): Promise<void> {
   const card = {
     name: displayName,
-    description: `${displayName} — SAID Butler agent for ${platform}`,
+    description: `${displayName} — SAID agent on ${platform}`,
     wallet: walletAddress,
     capabilities: ['messaging', 'assistant'],
     platform: 'said.hosting',
-    verified: true,
+    verified,
     registeredAt: new Date().toISOString(),
   };
 
@@ -93,11 +85,39 @@ export async function registerButlerUser(
     },
     body: JSON.stringify({ cardJson: JSON.stringify(card) }),
   }).catch(() => {
-    // Non-fatal — card can be stored later
     console.warn(`[butler-reg] Failed to store card for ${walletAddress}`);
   });
+}
 
-  // Step 2: Build register_agent instruction
+// ─── 1. Register Agent (sponsored, dust cost) ──────────────────────────────
+
+export interface RegisterResult {
+  success: boolean;
+  pda: string;
+  txSignature: string;
+  walletAddress: string;
+  metadataUri: string;
+  profile: string;
+  badge: string;
+  error?: string;
+}
+
+export async function registerAgent(
+  walletAddress: string,
+  privyWalletId: string,
+  displayName: string,
+  platform: string,
+  externalId: string,
+): Promise<RegisterResult> {
+  const agentPubkey = new PublicKey(walletAddress);
+  const sponsor = getSponsorKeypair();
+  const [pda] = computePda(agentPubkey);
+  const metadataUri = `https://api.saidprotocol.com/api/cards/${walletAddress}.json`;
+
+  // Store card on Protocol API
+  await storeAgentCard(walletAddress, displayName, platform, false);
+
+  // Build register_agent instruction
   const registerDiscriminator = Buffer.from([135, 157, 66, 195, 2, 113, 175, 30]);
   const uriBytes = Buffer.from(metadataUri, 'utf8');
   const uriLen = Buffer.alloc(4);
@@ -114,70 +134,48 @@ export async function registerButlerUser(
     data: registerData,
   });
 
-  // Step 3: Build get_verified instruction
-  const verifyDiscriminator = Buffer.from([132, 231, 2, 30, 115, 74, 23, 26]);
-
-  const verifyIx = new TransactionInstruction({
-    programId: SAID_PROGRAM_ID,
-    keys: [
-      { pubkey: pda, isSigner: false, isWritable: true },
-      { pubkey: treasuryPda, isSigner: false, isWritable: true },
-      { pubkey: agentPubkey, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data: verifyDiscriminator,
-  });
-
-  // Step 4: Build funding transfer (sponsor → agent, 0.015 SOL)
-  const FUND_AMOUNT = Math.ceil(0.015 * LAMPORTS_PER_SOL);
-
+  // Sponsor funds the rent (~0.002 SOL) for the PDA account
+  const RENT_FUND = Math.ceil(0.003 * LAMPORTS_PER_SOL);
   const fundIx = SystemProgram.transfer({
     fromPubkey: sponsor.publicKey,
     toPubkey: agentPubkey,
-    lamports: FUND_AMOUNT,
+    lamports: RENT_FUND,
   });
 
-  // Step 5: Build transaction with FRESH blockhash
+  // Build tx with fresh blockhash
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+  const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: sponsor.publicKey });
 
-  const tx = new Transaction({
-    blockhash,
-    lastValidBlockHeight,
-    feePayer: sponsor.publicKey,
-  });
-
-  tx.add(fundIx);       // 1. Fund agent wallet
+  tx.add(fundIx);       // 1. Fund agent for rent
   tx.add(registerIx);   // 2. Register on-chain
-  tx.add(verifyIx);     // 3. Verify (0.01 SOL → treasury)
 
-  // Step 6: Sponsor signs
+  // Sponsor signs (fee payer + funding)
   tx.partialSign(sponsor);
 
-  // Step 7: Serialize for Privy signing
+  // Serialize for Privy signing
   const serializedTx = tx.serialize({
     requireAllSignatures: false,
     verifySignatures: false,
   }).toString('base64');
 
-  // Step 8: Privy signs (does NOT broadcast — we handle that)
+  // Privy signs as agent wallet
   const signedTxBase64 = await signTransactionOnly(privyWalletId, serializedTx);
 
-  // Step 8b: Broadcast the fully-signed transaction ourselves
+  // Broadcast
   const signedTxBuffer = Buffer.from(signedTxBase64, 'base64');
   const txSignature = await connection.sendRawTransaction(signedTxBuffer, {
     skipPreflight: false,
     maxRetries: 3,
   });
 
-  // Wait for confirmation
   await connection.confirmTransaction(
     { signature: txSignature, blockhash, lastValidBlockHeight },
     'confirmed',
   );
 
-  console.log(`[butler-reg] Registered+verified ON-CHAIN: ${walletAddress}, PDA=${pda.toString()}, tx=${txSignature}`);
+  console.log(`[butler-reg] Registered ON-CHAIN: ${walletAddress}, PDA=${pda.toString()}, tx=${txSignature}`);
 
-  // Step 9: Update Protocol API database
+  // Update Protocol API database
   try {
     await fetch(`${SAID_API}/api/register/pending`, {
       method: 'POST',
@@ -185,7 +183,7 @@ export async function registerButlerUser(
       body: JSON.stringify({
         wallet: walletAddress,
         name: displayName,
-        description: `${displayName} — SAID Butler agent for ${platform}`,
+        description: `${displayName} — SAID agent on ${platform}`,
         capabilities: ['messaging', 'assistant'],
         source: 'butler',
       }),
@@ -204,3 +202,88 @@ export async function registerButlerUser(
     badge: `https://api.saidprotocol.com/api/badge/${walletAddress}.svg`,
   };
 }
+
+// ─── 2. Verify Agent (paid from agent wallet, ~0.013 SOL) ──────────────────
+
+export interface VerifyResult {
+  success: boolean;
+  pda: string;
+  verifyTxSignature: string;
+  walletAddress: string;
+  profile: string;
+  badge: string;
+  nftMinted: boolean;
+  error?: string;
+}
+
+export async function verifyAgent(
+  walletAddress: string,
+  privyWalletId: string,
+  displayName: string,
+  platform: string,
+): Promise<VerifyResult> {
+  const agentPubkey = new PublicKey(walletAddress);
+  const [pda] = computePda(agentPubkey);
+  const [treasuryPda] = computeTreasuryPda();
+
+  // Build get_verified instruction (0.01 SOL → treasury)
+  const verifyDiscriminator = Buffer.from([132, 231, 2, 30, 115, 74, 23, 26]);
+  const verifyIx = new TransactionInstruction({
+    programId: SAID_PROGRAM_ID,
+    keys: [
+      { pubkey: pda, isSigner: false, isWritable: true },
+      { pubkey: treasuryPda, isSigner: false, isWritable: true },
+      { pubkey: agentPubkey, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data: verifyDiscriminator,
+  });
+
+  // Agent wallet is fee payer (they funded it)
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+  const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: agentPubkey });
+
+  tx.add(verifyIx);
+
+  // Serialize for Privy signing (agent wallet pays for everything)
+  const serializedTx = tx.serialize({
+    requireAllSignatures: false,
+    verifySignatures: false,
+  }).toString('base64');
+
+  const signedTxBase64 = await signTransactionOnly(privyWalletId, serializedTx);
+
+  const signedTxBuffer = Buffer.from(signedTxBase64, 'base64');
+  const verifyTxSignature = await connection.sendRawTransaction(signedTxBuffer, {
+    skipPreflight: false,
+    maxRetries: 3,
+  });
+
+  await connection.confirmTransaction(
+    { signature: verifyTxSignature, blockhash, lastValidBlockHeight },
+    'confirmed',
+  );
+
+  console.log(`[butler-reg] Verified ON-CHAIN: ${walletAddress}, PDA=${pda.toString()}, tx=${verifyTxSignature}`);
+
+  // Update card to verified
+  await storeAgentCard(walletAddress, displayName, platform, true);
+
+  // TODO: Mint Metaplex NFT here
+  // For now, log that we need to add this
+  let nftMinted = false;
+  console.log(`[butler-reg] TODO: Mint Metaplex NFT for ${walletAddress}`);
+
+  return {
+    success: true,
+    pda: pda.toString(),
+    verifyTxSignature,
+    walletAddress,
+    profile: `https://www.saidprotocol.com/agents/${walletAddress}`,
+    badge: `https://api.saidprotocol.com/api/badge/${walletAddress}.svg`,
+    nftMinted,
+  };
+}
+
+// Legacy export for backward compat
+export const registerButlerUser = registerAgent;
