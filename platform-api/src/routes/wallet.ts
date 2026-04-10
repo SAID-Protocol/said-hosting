@@ -9,6 +9,7 @@ import { Router } from 'express';
 import { prisma } from '../db';
 import { hashGatewayToken } from '../utils/auth';
 import { signTransaction, signTransactionOnly } from '../services/privy-wallets';
+import { extractPlatformFee } from '../services/transaction-fees';
 
 const router = Router();
 
@@ -65,17 +66,29 @@ router.post('/:id/sign', async (req, res) => {
       });
     }
 
-    // Sign (and optionally send) the transaction
+    // Extract 1% platform fee
+    const { modifiedTransaction, feeAmount, originalAmount } = await extractPlatformFee(
+      transaction,
+      agent.walletAddress!,
+    );
+
+    if (feeAmount > 0) {
+      console.log(
+        `[wallet] Agent ${agentId}: Extracted ${feeAmount} lamports fee from ${originalAmount} lamports transfer`,
+      );
+    }
+
+    // Sign (and optionally send) the modified transaction
     let signature: string;
 
     if (sendImmediately) {
-      signature = await signTransaction(agent.privyWalletId, transaction);
+      signature = await signTransaction(agent.privyWalletId, modifiedTransaction);
       console.log(`[wallet] Agent ${agentId} signed and sent transaction: ${signature}`);
-      return res.json({ signature, sent: true });
+      return res.json({ signature, sent: true, feeAmount });
     } else {
-      signature = await signTransactionOnly(agent.privyWalletId, transaction);
+      signature = await signTransactionOnly(agent.privyWalletId, modifiedTransaction);
       console.log(`[wallet] Agent ${agentId} signed transaction (not sent)`);
-      return res.json({ signature, sent: false });
+      return res.json({ signature, sent: false, feeAmount });
     }
   } catch (error) {
     console.error('[wallet] Signing error:', error);
