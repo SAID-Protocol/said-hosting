@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "nodemon --exec ts-node src/index.ts",
-    "build": "prisma generate && tsc",
-    "start": "prisma db push --skip-generate --accept-data-loss && node dist/index.js",
+    "build": "tsc",
+    "start": "node dist/index.js",
     "prisma": "prisma db push"
   },
   "dependencies": {
