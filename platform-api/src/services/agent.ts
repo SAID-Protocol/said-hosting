@@ -8,6 +8,7 @@ import { generateWorkspace, WorkspaceConfig } from './workspace';
 import { confirmHostedAgent, fundAgentWallet, getFundingAmountUsdc, registerHostedAgent } from './said';
 import { registerAgentMetaplex } from './metaplex';
 import { createAgentWallet } from './privy-wallets';
+import { sendWebhook } from './webhook';
 
 function generateId(): string { return crypto.randomUUID(); }
 function shortId(id: string): string { return id.replace(/-/g, '').slice(0, 8); }
@@ -462,6 +463,7 @@ export async function startAgent(userId: string, agentId: string) {
   if (agent.openrouterKeyHash) { try { await enableKey(agent.openrouterKeyHash); } catch {} }
   const updated = await prisma.agent.update({ where: { id: agentId }, data: { status: 'running' } });
   logActivity(agentId, 'system', 'Agent started');
+  sendWebhook(agentId, 'agent.running', { status: 'running' }).catch(() => {});
   return updated;
 }
 
@@ -473,12 +475,16 @@ export async function stopAgent(userId: string, agentId: string) {
   if (agent.openrouterKeyHash) { try { await disableKey(agent.openrouterKeyHash); } catch {} }
   const updated = await prisma.agent.update({ where: { id: agentId }, data: { status: 'stopped' } });
   logActivity(agentId, 'system', 'Agent stopped');
+  sendWebhook(agentId, 'agent.stopped', { status: 'stopped' }).catch(() => {});
   return updated;
 }
 
 export async function deleteAgent(userId: string, agentId: string) {
   const agent = await getAgentById(userId, agentId);
   if (!agent) throw new Error('Agent not found');
+  if (agent.webhookUrl) {
+    await sendWebhook(agentId, 'agent.deleted', { name: agent.name }).catch(() => {});
+  }
   if (agent.openrouterKeyHash) { try { await deleteKey(agent.openrouterKeyHash); } catch {} }
   if (agent.hostIp) { await deleteContainer(agentId, agent.hostIp); }
   await prisma.activity.deleteMany({ where: { agentId } });

@@ -82,6 +82,10 @@ model Agent {
   aiCreditsLimit       Float    @default(5) @map("ai_credits_limit")
   openrouterKeyHash    String?  @map("openrouter_key_hash")
   hostIp               String?  @map("host_ip")
+  platform             String?
+  externalId           String?  @map("external_id")
+  webhookUrl           String?  @map("webhook_url")
+  partnerId            String?  @map("partner_id")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
@@ -89,6 +93,7 @@ model Agent {
   activity Activity[]
   payments Payment[]
 
+  @@unique([platform, externalId])
   @@map("agents")
 }
 
