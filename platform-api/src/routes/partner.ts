@@ -6,7 +6,22 @@ import { CreateAgentRequest } from '../types';
 
 export const partnerRouter = Router();
 
-const PARTNER_USER_ID = 'default-user';
+const ALLOWED_PARTNER_TIERS = new Set(['starter', 'pro', 'power']);
+
+async function ensurePartnerUser(partnerId: string): Promise<string> {
+  const userId = `partner-${partnerId}`;
+  await prisma.user.upsert({
+    where: { id: userId },
+    update: {},
+    create: {
+      id: userId,
+      email: `${userId}@partners.saidprotocol.com`,
+      tier: 'pro',
+      billingStatus: 'active',
+    },
+  });
+  return userId;
+}
 
 partnerRouter.post('/agents', async (req, res) => {
   try {
@@ -26,6 +41,14 @@ partnerRouter.post('/agents', async (req, res) => {
       return;
     }
 
+    const resolvedTier = (tier || 'starter').toString();
+    if (!ALLOWED_PARTNER_TIERS.has(resolvedTier)) {
+      res.status(400).json({
+        error: `Invalid tier. Allowed: ${[...ALLOWED_PARTNER_TIERS].join(', ')}`,
+      });
+      return;
+    }
+
     const existing = await prisma.agent.findUnique({
       where: { platform_externalId: { platform, externalId: external_id } },
     });
@@ -38,17 +61,19 @@ partnerRouter.post('/agents', async (req, res) => {
       return;
     }
 
+    const partnerUserId = await ensurePartnerUser(partnerId);
+
     const payload: CreateAgentRequest = {
       name: name.trim(),
       description,
-      tier: tier || 'starter',
+      tier: resolvedTier as CreateAgentRequest['tier'],
       program_md,
       config,
       telegram_token,
       custom_api_key,
     };
 
-    const agent = await createAgent(PARTNER_USER_ID, payload);
+    const agent = await createAgent(partnerUserId, payload);
 
     await prisma.agent.update({
       where: { id: agent.id },
