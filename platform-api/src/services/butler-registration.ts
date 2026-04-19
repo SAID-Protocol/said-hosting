@@ -163,8 +163,22 @@ export async function registerAgent(
 
   // Broadcast
   const signedTxBuffer = Buffer.from(signedTxBase64, 'base64');
+  const signedTx = Transaction.from(signedTxBuffer);
+
+  // Simulate first to get detailed logs
+  try {
+    const simulateResult = await connection.simulateTransaction(signedTx);
+    if (simulateResult.value.err) {
+      console.error('[butler-reg] Simulation logs:', simulateResult.value.logs);
+      throw new Error(`Simulation failed: ${JSON.stringify(simulateResult.value.err)}\nLogs: ${simulateResult.value.logs?.join('\n')}`);
+    }
+  } catch (simErr: any) {
+    console.error('[butler-reg] Full sim error:', simErr.message);
+    throw simErr;
+  }
+
   const txSignature = await connection.sendRawTransaction(signedTxBuffer, {
-    skipPreflight: false,
+    skipPreflight: true,
     maxRetries: 3,
   });
 
