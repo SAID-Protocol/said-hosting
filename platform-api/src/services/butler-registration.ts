@@ -135,7 +135,7 @@ export async function registerAgent(
   });
 
   // Sponsor funds the rent (~0.002 SOL) for the PDA account
-  const RENT_FUND = Math.ceil(0.003 * LAMPORTS_PER_SOL);
+  const RENT_FUND = Math.ceil(0.004 * LAMPORTS_PER_SOL);
   const fundIx = SystemProgram.transfer({
     fromPubkey: sponsor.publicKey,
     toPubkey: agentPubkey,
