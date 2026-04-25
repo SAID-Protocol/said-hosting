@@ -353,3 +353,79 @@ butlerRouter.post('/sign', async (req, res) => {
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Signing failed' });
   }
 });
+
+/**
+ * Butler Agent Send — build + sign + send in one server-side call.
+ * Fetches a fresh blockhash right before signing to avoid expiration.
+ *
+ * POST /api/butler/send
+ * Body: {
+ *   externalId: "tg_123456789",
+ *   instructions: [{
+ *     programId: "...",
+ *     keys: [{ pubkey: "...", isSigner: true/false, isWritable: true/false }],
+ *     data: "base64"
+ *   }]
+ * }
+ * Returns: { signature }
+ */
+butlerRouter.post('/send', async (req, res) => {
+  try {
+    const { externalId, instructions } = req.body || {};
+
+    if (!externalId || typeof externalId !== 'string') {
+      return res.status(400).json({ error: 'externalId is required' });
+    }
+    if (!Array.isArray(instructions) || instructions.length === 0) {
+      return res.status(400).json({ error: 'instructions array is required' });
+    }
+
+    const user = await prisma.butlerUser.findUnique({ where: { externalId } });
+    if (!user) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    if (!user.privyWalletId || !user.walletAddress) {
+      return res.status(400).json({ error: 'Agent wallet not provisioned' });
+    }
+
+    const {
+      Connection,
+      PublicKey,
+      TransactionInstruction,
+      VersionedTransaction,
+      TransactionMessage,
+    } = await import('@solana/web3.js');
+
+    const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+    const connection = new Connection(rpcUrl, 'confirmed');
+    const payer = new PublicKey(user.walletAddress);
+
+    const ixs = instructions.map((ix: any) => new TransactionInstruction({
+      programId: new PublicKey(ix.programId),
+      keys: ix.keys.map((k: any) => ({
+        pubkey: new PublicKey(k.pubkey),
+        isSigner: k.isSigner,
+        isWritable: k.isWritable,
+      })),
+      data: Buffer.from(ix.data, 'base64'),
+    }));
+
+    const { blockhash } = await connection.getLatestBlockhash('finalized');
+    const message = new TransactionMessage({
+      payerKey: payer,
+      recentBlockhash: blockhash,
+      instructions: ixs,
+    }).compileToV0Message();
+
+    const tx = new VersionedTransaction(message);
+    const txBase64 = Buffer.from(tx.serialize()).toString('base64');
+
+    const signature = await signTransaction(user.privyWalletId, txBase64);
+    console.log(`[butler-send] Signed+sent for ${externalId}: ${signature}`);
+
+    return res.json({ signature, sent: true });
+  } catch (error) {
+    console.error('[butler-send] Error:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Send failed' });
+  }
+});
