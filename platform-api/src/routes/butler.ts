@@ -429,3 +429,86 @@ butlerRouter.post('/send', async (req, res) => {
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Send failed' });
   }
 });
+
+/**
+ * Report a transaction fee from a Butler agent.
+ * The Butler calls this after each fee-generating action.
+ *
+ * POST /api/butler/fee
+ * Body: { externalId, action, amount, fee, currency, swapTxSignature? }
+ */
+butlerRouter.post('/fee', async (req, res) => {
+  try {
+    const { externalId, action, amount, fee, currency, swapTxSignature } = req.body || {};
+
+    if (!externalId || !action || !amount || !fee || !currency) {
+      return res.status(400).json({ error: 'externalId, action, amount, fee, currency are required' });
+    }
+
+    const user = await prisma.butlerUser.findUnique({ where: { externalId } });
+    if (!user) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    const record = await prisma.transactionFee.create({
+      data: {
+        agentId: externalId,
+        action,
+        amount: parseFloat(String(amount)),
+        fee: parseFloat(String(fee)),
+        currency,
+        collected: false,
+        swapTxSig: swapTxSignature || null,
+      },
+    });
+
+    console.log(`[fee] Recorded: ${action} ${amount} ${currency} → ${fee} ${currency} fee for ${externalId}`);
+    return res.json({ id: record.id, recorded: true });
+  } catch (error) {
+    console.error('[fee] Error:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Fee recording failed' });
+  }
+});
+
+/**
+ * Get fee summary — total volume, fees, breakdown by agent.
+ *
+ * GET /api/butler/fees?agentId=tg_123456789
+ */
+butlerRouter.get('/fees', async (req, res) => {
+  try {
+    const { agentId } = req.query;
+
+    const where = agentId ? { agentId: String(agentId) } : {};
+
+    const [totalFees, unclaimedFees, recentFees] = await Promise.all([
+      prisma.transactionFee.aggregate({
+        where,
+        _sum: { fee: true, amount: true },
+        _count: true,
+      }),
+      prisma.transactionFee.aggregate({
+        where: { ...where, collected: false },
+        _sum: { fee: true },
+        _count: true,
+      }),
+      prisma.transactionFee.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+    ]);
+
+    return res.json({
+      totalVolume: totalFees._sum.amount || 0,
+      totalFees: totalFees._sum.fee || 0,
+      totalTransactions: totalFees._count,
+      unclaimedFees: unclaimedFees._sum.fee || 0,
+      unclaimedCount: unclaimedFees._count,
+      recent: recentFees,
+    });
+  } catch (error) {
+    console.error('[fees] Error:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Fee lookup failed' });
+  }
+});

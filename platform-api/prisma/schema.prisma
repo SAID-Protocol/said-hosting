@@ -128,3 +128,22 @@ model ButlerUser {
 
   @@map("butler_users")
 }
+
+/// Transaction fees collected by the SAID network (1% on all agent actions)
+model TransactionFee {
+  id          Int      @id @default(autoincrement())
+  agentId     String   @map("agent_id")            // ButlerUser externalId (e.g. "tg_123456789")
+  action      String                               // "swap", "api:stablephone", "api:stableemail", etc.
+  amount      Float                                // Original transaction amount
+  fee         Float                                // 1% fee amount
+  currency    String                               // "USDC", "SOL", "JUP", etc.
+  collected   Boolean  @default(false)             // Whether fee was transferred to treasury on-chain
+  txSignature String?  @map("tx_signature")       // On-chain fee collection tx
+  swapTxSig   String?  @map("swap_tx_signature")  // Original swap/action tx
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([agentId])
+  @@index([collected])
+  @@index([createdAt])
+  @@map("transaction_fees")
+}
