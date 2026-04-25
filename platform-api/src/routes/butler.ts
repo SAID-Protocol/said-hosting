@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../db';
-import { createAgentWallet } from '../services/privy-wallets';
+import { createAgentWallet, signTransaction, signTransactionOnly } from '../services/privy-wallets';
 import { registerAgent, verifyAgent } from '../services/butler-registration';
 
 export const butlerRouter = Router();
@@ -307,5 +307,49 @@ butlerRouter.get('/users', async (req, res) => {
     res.json({ users, total, limit, offset });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'List failed' });
+  }
+});
+
+/**
+ * Butler Agent Signing — sign transactions with the agent's Privy wallet
+ * Uses API-key auth (same as other butler endpoints) instead of gateway tokens.
+ *
+ * POST /api/butler/sign
+ * Body: { externalId: "tg_123456789", transaction: "base64-tx", sendImmediately?: true }
+ * Returns: { signature, sent }
+ */
+butlerRouter.post('/sign', async (req, res) => {
+  try {
+    const { externalId, transaction, sendImmediately = true } = req.body || {};
+
+    if (!externalId || typeof externalId !== 'string') {
+      return res.status(400).json({ error: 'externalId is required' });
+    }
+    if (!transaction || typeof transaction !== 'string') {
+      return res.status(400).json({ error: 'transaction is required (base64-encoded)' });
+    }
+
+    const user = await prisma.butlerUser.findUnique({ where: { externalId } });
+    if (!user) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    if (!user.privyWalletId) {
+      return res.status(400).json({ error: 'Agent wallet not provisioned' });
+    }
+
+    let signature: string;
+
+    if (sendImmediately) {
+      signature = await signTransaction(user.privyWalletId, transaction);
+      console.log(`[butler] Signed+sent tx for ${externalId}: ${signature}`);
+      return res.json({ signature, sent: true });
+    } else {
+      signature = await signTransactionOnly(user.privyWalletId, transaction);
+      console.log(`[butler] Signed tx for ${externalId} (not sent)`);
+      return res.json({ signature, sent: false });
+    }
+  } catch (error) {
+    console.error('[butler] Sign error:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Signing failed' });
   }
 });
