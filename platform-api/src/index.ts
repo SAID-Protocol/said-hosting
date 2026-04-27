@@ -9,6 +9,7 @@ import { balanceRouter } from './routes/balance';
 import { aiProxyRouter } from './routes/ai-proxy';
 import walletRouter from './routes/wallet';
 import { butlerRouter } from './routes/butler';
+import { startFeeWatcher } from './services/fee-watcher';
 import { partnerRouter } from './routes/partner';
 import { runBillingCron } from './services/billing';
 import { authMiddleware } from './middleware/auth';
@@ -169,6 +170,9 @@ async function start() {
 
   app.listen(PORT, () => {
     console.log(`SAID Platform API v0.2.0 running on port ${PORT}`);
+    
+    // Start fee watcher — polls agent wallets for swap transactions
+    startFeeWatcher(60000).catch(err => console.error('[fee-watcher] Failed to start:', err));
     
     // Run billing cron daily at midnight UTC
     const scheduleBillingCron = () => {
