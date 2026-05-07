@@ -325,6 +325,44 @@ agentRouter.get('/:id/logs', async (req, res) => {
   }
 });
 
+agentRouter.get('/:id/api-key', async (req, res) => {
+  try {
+    const userId = (req as typeof req & { userId: string }).userId;
+    const agent = await getAgentById(userId, req.params.id);
+    if (!agent) { res.status(404).json({ error: 'Agent not found' }); return; }
+
+    if (!agent.gatewayToken) {
+      res.json({ gatewayToken: null });
+      return;
+    }
+
+    res.json({ gatewayToken: agent.gatewayToken });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch API key' });
+  }
+});
+
+agentRouter.post('/:id/rotate-key', async (req, res) => {
+  try {
+    const userId = (req as typeof req & { userId: string }).userId;
+    const agent = await getAgentById(userId, req.params.id);
+    if (!agent) { res.status(404).json({ error: 'Agent not found' }); return; }
+
+    const { generateGatewayToken, hashGatewayToken } = await import('../utils/auth');
+    const newToken = generateGatewayToken();
+    const newHash = hashGatewayToken(newToken);
+
+    await prisma.agent.update({
+      where: { id: req.params.id },
+      data: { gatewayToken: newToken, gatewayTokenHash: newHash },
+    });
+
+    res.json({ gatewayToken: newToken });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to rotate key' });
+  }
+});
+
 agentRouter.get('/:id/usage', async (req, res) => {
   try {
     const userId = (req as typeof req & { userId: string }).userId;
