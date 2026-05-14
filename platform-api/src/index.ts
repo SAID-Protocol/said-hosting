@@ -21,11 +21,24 @@ app.disable('x-powered-by');
 const PORT = process.env.PORT || 3002;
 
 // --- Rate limiting ---
+// Key by user identity (API key or session token) when available, fall back to IP
+const rateLimitKeyGenerator = (req: express.Request): string => {
+  // Prefer API key header
+  const apiKey = req.headers['x-api-key'] as string;
+  if (apiKey) return `key:${apiKey.slice(0, 16)}`;
+  // Prefer Authorization header (session token)
+  const auth = req.headers['authorization'] as string;
+  if (auth) return `auth:${auth.slice(0, 32)}`;
+  // Fall back to IP (Vercel edge may share IPs)
+  return req.ip || 'unknown';
+};
+
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 600,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateLimitKeyGenerator,
   message: { error: 'Too many requests, please try again later' },
 });
 
