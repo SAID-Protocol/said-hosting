@@ -286,6 +286,43 @@ butlerRouter.get('/user/:externalId', async (req, res) => {
 });
 
 /**
+ * Resolve a social handle (X or Telegram) to a Solana wallet, via Privy.
+ *
+ * Butler's local SQLite only knows about users who interacted with butler
+ * directly. Many SAID Privy users (PWA logins, hosted agents) aren't in
+ * butler's DB but are reachable on-chain via their Privy-linked accounts.
+ * This endpoint asks Privy "do you have a user whose linked twitter/telegram
+ * account is @handle?" and returns their Solana embedded-wallet address.
+ *
+ * POST /api/butler/resolve-handle
+ * Body: { handle: string, platform: "twitter" | "telegram" }
+ * Returns: { found: boolean, walletAddress?: string, privyUserId?: string, displayName?: string }
+ *
+ * Used by butler-container's social/resolver.ts as a fallback after local DB miss.
+ */
+butlerRouter.post('/resolve-handle', async (req, res) => {
+  try {
+    const { handle, platform } = req.body || {};
+    if (!handle || typeof handle !== 'string') {
+      res.status(400).json({ error: 'handle is required' });
+      return;
+    }
+    if (platform !== 'twitter' && platform !== 'telegram') {
+      res.status(400).json({ error: 'platform must be "twitter" or "telegram"' });
+      return;
+    }
+    const username = handle.replace(/^@/, '').toLowerCase();
+
+    const { resolveHandleViaPrivy } = await import('../services/privy-wallets');
+    const result = await resolveHandleViaPrivy(username, platform);
+    res.json(result);
+  } catch (error) {
+    console.error('[butler/resolve-handle]', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Resolve failed' });
+  }
+});
+
+/**
  * List all agents (admin/stats)
  *
  * GET /api/butler/users?limit=50&offset=0
