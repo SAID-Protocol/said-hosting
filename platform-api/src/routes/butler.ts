@@ -1,7 +1,22 @@
 import { Router } from 'express';
 import { prisma } from '../db';
-import { createAgentWallet, signTransaction, signTransactionOnly } from '../services/privy-wallets';
+import {
+  createAgentWallet,
+  signTransaction,
+  signTransactionOnly,
+  preProvisionTwitterUser,
+} from '../services/privy-wallets';
 import { registerAgent, verifyAgent } from '../services/butler-registration';
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  TransactionInstruction,
+  LAMPORTS_PER_SOL,
+} from '@solana/web3.js';
+import bs58 from 'bs58';
 
 export const butlerRouter = Router();
 
@@ -282,6 +297,240 @@ butlerRouter.get('/user/:externalId', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Lookup failed' });
+  }
+});
+
+/**
+ * Resolve a social handle (X or Telegram) to a Solana wallet, via Privy.
+ *
+ * Butler's local SQLite only knows about users who interacted with butler
+ * directly. Many SAID Privy users (PWA logins, hosted agents) aren't in
+ * butler's DB but are reachable on-chain via their Privy-linked accounts.
+ * This endpoint asks Privy "do you have a user whose linked twitter/telegram
+ * account is @handle?" and returns their Solana embedded-wallet address.
+ *
+ * POST /api/butler/resolve-handle
+ * Body: { handle: string, platform: "twitter" | "telegram" }
+ * Returns: { found: boolean, walletAddress?: string, privyUserId?: string, displayName?: string }
+ *
+ * Used by butler-container's social/resolver.ts as a fallback after local DB miss.
+ */
+butlerRouter.post('/resolve-handle', async (req, res) => {
+  try {
+    const { handle, platform } = req.body || {};
+    if (!handle || typeof handle !== 'string') {
+      res.status(400).json({ error: 'handle is required' });
+      return;
+    }
+    if (platform !== 'twitter' && platform !== 'telegram') {
+      res.status(400).json({ error: 'platform must be "twitter" or "telegram"' });
+      return;
+    }
+    const username = handle.replace(/^@/, '').toLowerCase();
+
+    const { resolveHandleViaPrivy } = await import('../services/privy-wallets');
+    const result = await resolveHandleViaPrivy(username, platform);
+    res.json(result);
+  } catch (error) {
+    console.error('[butler/resolve-handle]', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Resolve failed' });
+  }
+});
+
+/**
+ * Pre-provision a recipient at send-time and transfer funds immediately.
+ *
+ * The "seamless send" flow: Alice sends to @bob_on_x; Bob has never touched
+ * SAID. We resolve his X handle → user_id, create a Privy user with his
+ * Twitter account pre-linked + a fresh Solana wallet, run atomic
+ * sponsor-funded register+verify on that wallet, then transfer Alice's funds
+ * to it. When Bob eventually logs into any SAID Privy app via X, Privy
+ * reconciles to the pre-existing user and hands him the wallet — funds are
+ * already his, no claim step.
+ *
+ * Platform support:
+ *   - twitter: full pre-provisioning, requires X_BEARER_TOKEN env var
+ *   - telegram: NOT supported via handle (Privy needs telegram_user_id, not
+ *     username; Telegram bot API doesn't expose handle→user_id lookups for
+ *     users who haven't messaged the bot)
+ *
+ * Returns 503 with `fallback: "pending_send"` when pre-provisioning isn't
+ * available (missing X creds, telegram handle, X user not found, etc.) so
+ * caller can gracefully fall back to the existing pending_send + invite flow.
+ *
+ * POST /api/butler/pre-provision-recipient
+ * Body: {
+ *   handle: string,             // recipient @handle, with or without leading @
+ *   platform: "twitter",        // only twitter supported today
+ *   senderExternalId: string,   // butler user (e.g. tg_123) — pays for the transfer
+ *   amount: number,             // amount to transfer
+ *   asset: "SOL" | "USDC"
+ * }
+ * Returns: {
+ *   success: boolean,
+ *   recipient?: { privyUserId, walletAddress, saidPda, xUserId },
+ *   transferTx?: string,        // base58 signature of the fund-in transfer
+ *   reason?: string,            // on failure, why
+ *   fallback?: "pending_send"   // if caller should fall back to invite-link path
+ * }
+ */
+butlerRouter.post('/pre-provision-recipient', async (req, res) => {
+  try {
+    const { handle, platform, senderExternalId, amount, asset } = req.body || {};
+
+    // Input validation
+    if (!handle || typeof handle !== 'string') {
+      res.status(400).json({ success: false, reason: 'handle is required' });
+      return;
+    }
+    if (platform !== 'twitter') {
+      res.status(503).json({
+        success: false,
+        reason: `Pre-provisioning by ${platform} handle isn't supported — Privy requires telegram_user_id, not username`,
+        fallback: 'pending_send',
+      });
+      return;
+    }
+    if (!senderExternalId || typeof senderExternalId !== 'string') {
+      res.status(400).json({ success: false, reason: 'senderExternalId is required' });
+      return;
+    }
+    if (typeof amount !== 'number' || amount <= 0) {
+      res.status(400).json({ success: false, reason: 'amount must be a positive number' });
+      return;
+    }
+    if (asset !== 'SOL' && asset !== 'USDC') {
+      res.status(400).json({ success: false, reason: 'asset must be SOL or USDC' });
+      return;
+    }
+
+    // Sender must be an existing butler user with a Privy wallet
+    const sender = await prisma.butlerUser.findUnique({ where: { externalId: senderExternalId } });
+    if (!sender?.walletAddress || !sender?.privyWalletId) {
+      res.status(400).json({ success: false, reason: 'Sender butler user not found or wallet not provisioned' });
+      return;
+    }
+
+    // Step 1: pre-provision the recipient (X handle → Privy user + Solana wallet)
+    const preProv = await preProvisionTwitterUser(handle);
+    if (!preProv.ok) {
+      const fallback = /X_BEARER_TOKEN/.test(preProv.reason) ? 'pending_send' : undefined;
+      console.log(`[pre-provision] @${handle} skipped: ${preProv.reason}`);
+      res.status(fallback ? 503 : 400).json({
+        success: false,
+        reason: preProv.reason,
+        ...(fallback ? { fallback } : {}),
+      });
+      return;
+    }
+    console.log(
+      `[pre-provision] created Privy user ${preProv.privyUserId} for @${handle} → wallet ${preProv.walletAddress}`,
+    );
+
+    // Step 2: atomic sponsor-funded register+verify for the new wallet via Protocol API
+    const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+    const SAID_PLATFORM_KEY = process.env.SAID_HOSTING_API_KEY || '';
+    const cleanHandle = handle.replace(/^@/, '');
+    const buildRes = await fetch(`${SAID_API}/api/platforms/said-hosting/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Platform-Key': SAID_PLATFORM_KEY },
+      body: JSON.stringify({
+        wallet: preProv.walletAddress,
+        name: cleanHandle,
+        description: `${cleanHandle} — SAID agent on twitter (pre-provisioned by send-by-handle)`,
+        capabilities: ['messaging', 'assistant'],
+      }),
+    });
+    const buildData: any = await buildRes.json();
+
+    let saidPda: string | undefined;
+    if (buildData.transaction) {
+      // Sign the atomic register+verify tx with the new Privy wallet
+      const signedTx = await signTransactionOnly(preProv.privyWalletId, buildData.transaction);
+      const confirmRes = await fetch(`${SAID_API}/api/platforms/said-hosting/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Platform-Key': SAID_PLATFORM_KEY },
+        body: JSON.stringify({
+          signedTransaction: signedTx,
+          wallet: preProv.walletAddress,
+          name: cleanHandle,
+          description: `${cleanHandle} — SAID agent on twitter (pre-provisioned by send-by-handle)`,
+          capabilities: ['messaging', 'assistant'],
+        }),
+      });
+      const confirmData: any = await confirmRes.json();
+      if (!confirmData.success) {
+        console.error('[pre-provision] register+verify failed:', confirmData);
+        res.status(500).json({
+          success: false,
+          reason: `register+verify failed: ${confirmData.error ?? 'unknown'}`,
+          recipient: { privyUserId: preProv.privyUserId, walletAddress: preProv.walletAddress, xUserId: preProv.xUserId },
+        });
+        return;
+      }
+      saidPda = buildData.pda;
+    } else if (buildData.agent) {
+      // Already on-chain (early-exit branch in Protocol API)
+      saidPda = buildData.agent.pda;
+    }
+
+    // Step 3: transfer funds from sender → recipient wallet using sender's Privy wallet.
+    // Build a Solana tx with the user transfer + 1% atomic SAID treasury fee,
+    // signed by sender via Privy.
+    const SOLANA_RPC = process.env.SOLANA_RPC_URL || 'https://solana-rpc.publicnode.com';
+    const SAID_TREASURY = 'C5wJSdRH5tcgu7msEHftJk5tEd9pqs2dwUgFqxkfdrPp'; // SAID treasury wallet
+    const connection = new Connection(SOLANA_RPC, 'confirmed');
+    const senderPubkey = new PublicKey(sender.walletAddress);
+    const recipientPubkey = new PublicKey(preProv.walletAddress);
+
+    let transferTxSig: string | undefined;
+    if (asset === 'SOL') {
+      const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+      const feeLamports = Math.floor(lamports * 0.01);
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: senderPubkey });
+      tx.add(SystemProgram.transfer({ fromPubkey: senderPubkey, toPubkey: recipientPubkey, lamports }));
+      if (feeLamports > 0) {
+        tx.add(SystemProgram.transfer({
+          fromPubkey: senderPubkey,
+          toPubkey: new PublicKey(SAID_TREASURY),
+          lamports: feeLamports,
+        }));
+      }
+      const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64');
+      transferTxSig = await signTransaction(sender.privyWalletId, serialized);
+    } else {
+      // USDC transfer path — TODO: build with SPL token instructions.
+      // For now, fail the pre-provision and let caller fall back to pending_send.
+      console.warn('[pre-provision] USDC transfer not yet implemented in pre-provision flow');
+      res.status(503).json({
+        success: false,
+        reason: 'USDC pre-provision transfer not yet implemented',
+        fallback: 'pending_send',
+      });
+      return;
+    }
+
+    console.log(
+      `[pre-provision] funded @${handle} (${preProv.walletAddress.slice(0, 8)}…) with ${amount} ${asset}, tx=${transferTxSig}`,
+    );
+
+    res.json({
+      success: true,
+      recipient: {
+        privyUserId: preProv.privyUserId,
+        walletAddress: preProv.walletAddress,
+        saidPda,
+        xUserId: preProv.xUserId,
+      },
+      transferTx: transferTxSig,
+    });
+  } catch (error) {
+    console.error('[pre-provision-recipient]', error);
+    res.status(500).json({
+      success: false,
+      reason: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 });
 
