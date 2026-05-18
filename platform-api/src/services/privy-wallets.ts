@@ -210,9 +210,14 @@ export async function preProvisionTwitterUser(
   | { ok: true; privyUserId: string; privyWalletId: string; walletAddress: string; xUserId: string }
   | { ok: false; reason: string }
 > {
-  const bearerToken = process.env.X_BEARER_TOKEN;
+  // Accept either X_BEARER_TOKEN (canonical) or TWITTER_BEARER_TOKEN (legacy
+  // name; matches the butler container's x-bot env). Same value either way.
+  const bearerToken = process.env.X_BEARER_TOKEN || process.env.TWITTER_BEARER_TOKEN;
   if (!bearerToken) {
-    return { ok: false, reason: 'X_BEARER_TOKEN not configured — cannot resolve handle to X user_id' };
+    return {
+      ok: false,
+      reason: 'X bearer token not configured (set X_BEARER_TOKEN or TWITTER_BEARER_TOKEN) — cannot resolve handle to X user_id',
+    };
   }
 
   // Step 1: X handle → numeric user_id
