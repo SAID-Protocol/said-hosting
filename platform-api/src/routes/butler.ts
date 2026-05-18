@@ -337,7 +337,7 @@ butlerRouter.post('/resolve-handle', async (req, res) => {
   }
 });
 
-// ── Pre-provision rate limiter ──
+// ── Pre-provision rate limiter (Postgres-backed) ──
 //
 // Each successful pre-provision call costs the sponsor wallet ~0.005 SOL
 // (PDA rent + tx fees, treasury gets the 0.01 verify fee back) and creates
@@ -350,38 +350,62 @@ butlerRouter.post('/resolve-handle', async (req, res) => {
 //   - 5 pre-provisions per rolling hour
 //   - 20 pre-provisions per rolling day
 //
-// In-memory Map; resets on Railway restart, which is fine — restarts are
-// rare and a determined attacker can already spin up new butler users.
-// Pruned per-call so memory stays bounded by active-sender count.
+// Postgres-backed (via Prisma $executeRaw / $queryRaw) so the limit holds
+// across Railway's multi-replica deploy. In-memory Map was insufficient
+// because requests load-balanced across instances each had their own count.
 
 const PRE_PROVISION_HOUR_CAP = 5;
 const PRE_PROVISION_DAY_CAP = 20;
-const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
 
-const preProvisionAttempts = new Map<string, number[]>();
+let rateTableReady = false;
+async function ensureRateLimitTable(): Promise<void> {
+  if (rateTableReady) return;
+  // Idempotent — runs once per process. Table is small (rows per call,
+  // pruned monthly by separate maintenance) so no partitioning concerns.
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS pre_provision_attempts (
+      id BIGSERIAL PRIMARY KEY,
+      sender_external_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS pre_provision_attempts_sender_created_idx
+    ON pre_provision_attempts (sender_external_id, created_at DESC)
+  `);
+  rateTableReady = true;
+}
 
-function checkPreProvisionRateLimit(senderId: string): {
+async function checkPreProvisionRateLimit(senderId: string): Promise<{
   allowed: boolean;
   hourCount: number;
   dayCount: number;
   reason?: string;
-} {
-  const now = Date.now();
-  const dayAgo = now - DAY_MS;
-  const hourAgo = now - HOUR_MS;
+}> {
+  await ensureRateLimitTable();
 
-  const timestamps = preProvisionAttempts.get(senderId) || [];
-  const recent = timestamps.filter((t) => t > dayAgo); // prune > 24h
-  const hourCount = recent.filter((t) => t > hourAgo).length;
-  const dayCount = recent.length;
+  // Single query that returns both hour + day counts so we don't roundtrip twice.
+  // Race condition: two concurrent requests can both see count below cap and
+  // both proceed. Acceptable at our scale; the budget impact of a single
+  // racing extra is bounded by per-call sponsor cost (~0.005 SOL).
+  const rows = await prisma.$queryRawUnsafe<Array<{ hour_count: bigint; day_count: bigint }>>(
+    `SELECT
+       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') AS hour_count,
+       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 day')  AS day_count
+     FROM pre_provision_attempts
+     WHERE sender_external_id = $1`,
+    senderId,
+  );
+
+  const hourCount = Number(rows[0]?.hour_count ?? 0);
+  const dayCount = Number(rows[0]?.day_count ?? 0);
 
   if (hourCount >= PRE_PROVISION_HOUR_CAP) {
     return {
       allowed: false,
       hourCount,
       dayCount,
-      reason: `Rate limit: max ${PRE_PROVISION_HOUR_CAP} pre-provisions per hour per sender (you've made ${hourCount} in the last hour). Try again in ~${Math.ceil((recent.filter((t) => t > hourAgo)[0] + HOUR_MS - now) / 60000)} minutes.`,
+      reason: `Rate limit: max ${PRE_PROVISION_HOUR_CAP} pre-provisions per hour per sender (you've made ${hourCount} in the last hour). Try again later.`,
     };
   }
   if (dayCount >= PRE_PROVISION_DAY_CAP) {
@@ -393,10 +417,12 @@ function checkPreProvisionRateLimit(senderId: string): {
     };
   }
 
-  // Record this attempt (counts whether or not the pre-provision itself succeeds —
-  // X API probes are themselves rate-limit-worthy)
-  recent.push(now);
-  preProvisionAttempts.set(senderId, recent);
+  // Record the attempt — runs even if pre-provision itself fails downstream
+  // (X handle not found, etc.) so we rate-limit probes too.
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO pre_provision_attempts (sender_external_id) VALUES ($1)`,
+    senderId,
+  );
 
   return { allowed: true, hourCount: hourCount + 1, dayCount: dayCount + 1 };
 }
@@ -479,7 +505,7 @@ butlerRouter.post('/pre-provision-recipient', async (req, res) => {
     // and before any Privy/on-chain work. NOT presented as a graceful fallback
     // (no `fallback: "pending_send"`): exceeding the limit should surface as
     // an error to the user, not silently route around it via invite links.
-    const rl = checkPreProvisionRateLimit(senderExternalId);
+    const rl = await checkPreProvisionRateLimit(senderExternalId);
     if (!rl.allowed) {
       console.warn(`[pre-provision] rate limit hit for ${senderExternalId}: ${rl.reason}`);
       res.status(429).json({
