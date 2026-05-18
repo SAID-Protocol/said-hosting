@@ -337,6 +337,70 @@ butlerRouter.post('/resolve-handle', async (req, res) => {
   }
 });
 
+// ── Pre-provision rate limiter ──
+//
+// Each successful pre-provision call costs the sponsor wallet ~0.005 SOL
+// (PDA rent + tx fees, treasury gets the 0.01 verify fee back) and creates
+// a real Privy user. Without limits, any verified butler user with the
+// platform API key could spam-create thousands of Privy users for arbitrary
+// X handles — exhausting the sponsor wallet, hitting X/Privy rate limits,
+// and polluting the SAID directory with synthetic agents.
+//
+// Per-sender caps:
+//   - 5 pre-provisions per rolling hour
+//   - 20 pre-provisions per rolling day
+//
+// In-memory Map; resets on Railway restart, which is fine — restarts are
+// rare and a determined attacker can already spin up new butler users.
+// Pruned per-call so memory stays bounded by active-sender count.
+
+const PRE_PROVISION_HOUR_CAP = 5;
+const PRE_PROVISION_DAY_CAP = 20;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+const preProvisionAttempts = new Map<string, number[]>();
+
+function checkPreProvisionRateLimit(senderId: string): {
+  allowed: boolean;
+  hourCount: number;
+  dayCount: number;
+  reason?: string;
+} {
+  const now = Date.now();
+  const dayAgo = now - DAY_MS;
+  const hourAgo = now - HOUR_MS;
+
+  const timestamps = preProvisionAttempts.get(senderId) || [];
+  const recent = timestamps.filter((t) => t > dayAgo); // prune > 24h
+  const hourCount = recent.filter((t) => t > hourAgo).length;
+  const dayCount = recent.length;
+
+  if (hourCount >= PRE_PROVISION_HOUR_CAP) {
+    return {
+      allowed: false,
+      hourCount,
+      dayCount,
+      reason: `Rate limit: max ${PRE_PROVISION_HOUR_CAP} pre-provisions per hour per sender (you've made ${hourCount} in the last hour). Try again in ~${Math.ceil((recent.filter((t) => t > hourAgo)[0] + HOUR_MS - now) / 60000)} minutes.`,
+    };
+  }
+  if (dayCount >= PRE_PROVISION_DAY_CAP) {
+    return {
+      allowed: false,
+      hourCount,
+      dayCount,
+      reason: `Rate limit: max ${PRE_PROVISION_DAY_CAP} pre-provisions per day per sender (you've made ${dayCount} in the last 24h). Try again tomorrow.`,
+    };
+  }
+
+  // Record this attempt (counts whether or not the pre-provision itself succeeds —
+  // X API probes are themselves rate-limit-worthy)
+  recent.push(now);
+  preProvisionAttempts.set(senderId, recent);
+
+  return { allowed: true, hourCount: hourCount + 1, dayCount: dayCount + 1 };
+}
+
 /**
  * Pre-provision a recipient at send-time and transfer funds immediately.
  *
@@ -408,6 +472,22 @@ butlerRouter.post('/pre-provision-recipient', async (req, res) => {
     const sender = await prisma.butlerUser.findUnique({ where: { externalId: senderExternalId } });
     if (!sender?.walletAddress || !sender?.privyWalletId) {
       res.status(400).json({ success: false, reason: 'Sender butler user not found or wallet not provisioned' });
+      return;
+    }
+
+    // Rate limit check (per-sender, hour + day caps) — runs before X API call
+    // and before any Privy/on-chain work. NOT presented as a graceful fallback
+    // (no `fallback: "pending_send"`): exceeding the limit should surface as
+    // an error to the user, not silently route around it via invite links.
+    const rl = checkPreProvisionRateLimit(senderExternalId);
+    if (!rl.allowed) {
+      console.warn(`[pre-provision] rate limit hit for ${senderExternalId}: ${rl.reason}`);
+      res.status(429).json({
+        success: false,
+        reason: rl.reason,
+        hourCount: rl.hourCount,
+        dayCount: rl.dayCount,
+      });
       return;
     }
 
