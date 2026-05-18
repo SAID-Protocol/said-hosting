@@ -147,8 +147,8 @@ export async function resolveHandleViaPrivy(
   try {
     const user: any =
       platform === 'twitter'
-        ? await (privy as any).users.getByTwitterUsername({ username })
-        : await (privy as any).users.getByTelegramUsername({ username });
+        ? await (privy as any).users().getByTwitterUsername({ username })
+        : await (privy as any).users().getByTelegramUsername({ username });
 
     if (!user) return { found: false };
 
@@ -240,7 +240,7 @@ export async function preProvisionTwitterUser(
 
   // Step 2: idempotency — check if Privy already has this X user pre-linked
   try {
-    const existing: any = await (privy as any).users.getByTwitterUsername({ username: username.replace(/^@/, '') });
+    const existing: any = await (privy as any).users().getByTwitterUsername({ username: username.replace(/^@/, '') });
     if (existing) {
       const linked: any[] = existing.linked_accounts || [];
       const wallet = linked.find(
@@ -264,7 +264,7 @@ export async function preProvisionTwitterUser(
 
   // Step 3: Privy create user with pre-linked Twitter + Solana wallet
   try {
-    const created: any = await (privy as any).users.create({
+    const created: any = await (privy as any).users().create({
       linked_accounts: [
         {
           type: 'twitter_oauth',
