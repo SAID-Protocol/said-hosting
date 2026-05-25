@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { createAgent, deleteAgent, getAgentById, getAgentLogs, getAgentStatus, listAgents, startAgent, stopAgent, updateAgent, registerAgentSaid, confirmAgentSaid } from '../services/agent';
 import { CreateAgentRequest } from '../types';
 import { getKeyInfo } from '../services/openrouter';
+import { createAgentWallet } from '../services/privy-wallets';
+import { generateGatewayToken, hashGatewayToken } from '../utils/auth';
 import { prisma } from '../db';
 
 export const agentRouter = Router();
@@ -506,5 +508,60 @@ agentRouter.post('/:id/chat', async (req, res) => {
       error: error instanceof Error ? error.message : 'Failed to proxy chat',
       details: error instanceof Error ? error.stack : undefined
     });
+  }
+});
+
+/**
+ * POST /agents/:id/provision-wallet
+ * Create a Privy custodial wallet + API key for any agent.
+ * Works for both hosted and protocol-only agents. No container needed.
+ * Requires session auth (same as other user-scoped endpoints).
+ */
+agentRouter.post('/:id/provision-wallet', async (req, res) => {
+  try {
+    const userId = (req as typeof req & { userId: string }).userId;
+    const agentId = req.params.id;
+
+    const agent = await prisma.agent.findFirst({ where: { id: agentId, userId } });
+    if (!agent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    // Idempotent: return existing wallet + key
+    if (agent.privyWalletId && agent.walletAddress && agent.gatewayToken) {
+      return res.json({
+        walletAddress: agent.walletAddress,
+        gatewayToken: agent.gatewayToken,
+        existing: true,
+      });
+    }
+
+    // Create Privy wallet
+    const { walletId, address } = await createAgentWallet();
+
+    // Generate gateway token (API key)
+    const gatewayToken = generateGatewayToken();
+    const gatewayTokenHash = hashGatewayToken(gatewayToken);
+
+    await prisma.agent.update({
+      where: { id: agentId },
+      data: {
+        privyWalletId: walletId,
+        walletAddress: address,
+        gatewayToken,
+        gatewayTokenHash,
+      },
+    });
+
+    console.log(`[provision-wallet] Created wallet ${address} for agent ${agentId} (user ${userId})`);
+
+    return res.json({
+      walletAddress: address,
+      gatewayToken,
+      existing: false,
+    });
+  } catch (error) {
+    console.error('[provision-wallet] Error:', error);
+    return res.status(500).json({ error: 'Failed to provision wallet' });
   }
 });
