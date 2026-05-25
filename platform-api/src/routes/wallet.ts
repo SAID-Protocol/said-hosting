@@ -70,7 +70,7 @@ router.post('/:id/provision-wallet', async (req, res) => {
 
     return res.json({
       walletAddress: address,
-      gatewayToken,
+      apiKey: gatewayToken,
       existing: false,
     });
   } catch (error) {

@@ -531,7 +531,7 @@ agentRouter.post('/:id/provision-wallet', async (req, res) => {
     if (agent.privyWalletId && agent.walletAddress && agent.gatewayToken) {
       return res.json({
         walletAddress: agent.walletAddress,
-        gatewayToken: agent.gatewayToken,
+        apiKey: agent.gatewayToken,
         existing: true,
       });
     }
@@ -539,17 +539,17 @@ agentRouter.post('/:id/provision-wallet', async (req, res) => {
     // Create Privy wallet
     const { walletId, address } = await createAgentWallet();
 
-    // Generate gateway token (API key)
-    const gatewayToken = generateGatewayToken();
-    const gatewayTokenHash = hashGatewayToken(gatewayToken);
+    // Generate API key
+    const apiKey = generateGatewayToken();
+    const apiKeyHash = hashGatewayToken(apiKey);
 
     await prisma.agent.update({
       where: { id: agentId },
       data: {
         privyWalletId: walletId,
         walletAddress: address,
-        gatewayToken,
-        gatewayTokenHash,
+        gatewayToken: apiKey,
+        gatewayTokenHash: apiKeyHash,
       },
     });
 
@@ -557,7 +557,7 @@ agentRouter.post('/:id/provision-wallet', async (req, res) => {
 
     return res.json({
       walletAddress: address,
-      gatewayToken,
+      apiKey,
       existing: false,
     });
   } catch (error) {
