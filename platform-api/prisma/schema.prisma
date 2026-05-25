@@ -147,3 +147,12 @@ model TransactionFee {
   @@index([createdAt])
   @@map("transaction_fees")
 }
+
+model PreProvisionAttempt {
+  id               BigInt   @id @default(autoincrement())
+  senderExternalId String   @map("sender_external_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([senderExternalId, createdAt])
+  @@map("pre_provision_attempts")
+}
