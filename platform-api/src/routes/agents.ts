@@ -532,6 +532,7 @@ agentRouter.post('/:id/provision-wallet', async (req, res) => {
       return res.json({
         walletAddress: agent.walletAddress,
         apiKey: agent.gatewayToken,
+        gatewayToken: agent.gatewayToken, // backward compat
         existing: true,
       });
     }
@@ -558,6 +559,7 @@ agentRouter.post('/:id/provision-wallet', async (req, res) => {
     return res.json({
       walletAddress: address,
       apiKey,
+      gatewayToken: apiKey, // backward compat
       existing: false,
     });
   } catch (error) {
