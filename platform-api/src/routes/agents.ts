@@ -650,10 +650,10 @@ agentRouter.post('/create-with-wallet', async (req, res) => {
               profile: regData.agent?.profile,
             };
           } else if (regData.transaction) {
-            // Step 2: Sign transaction with Privy wallet
-            const { signTransaction } = await import('../services/privy-wallets');
-            const signature = await signTransaction(walletId, regData.transaction);
-            console.log(`[create-with-wallet] Signed registration tx: ${signature}`);
+            // Step 2: Sign transaction with Privy wallet (sign only, don't send)
+            const { signTransactionOnly } = await import('../services/privy-wallets');
+            const signedTx = await signTransactionOnly(walletId, regData.transaction);
+            console.log(`[create-with-wallet] Signed registration tx for ${address}`);
 
             // Step 3: Confirm/broadcast via Protocol API
             const confirmRes = await fetch('https://api.saidprotocol.com/api/platforms/said-hosting/confirm', {
@@ -663,7 +663,7 @@ agentRouter.post('/create-with-wallet', async (req, res) => {
                 'X-Platform-Key': hostingApiKey,
               },
               body: JSON.stringify({
-                signedTransaction: signature,
+                signedTransaction: signedTx,
                 wallet: address,
               }),
               signal: AbortSignal.timeout(30000),
