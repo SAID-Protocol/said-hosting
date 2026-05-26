@@ -522,9 +522,38 @@ agentRouter.post('/:id/provision-wallet', async (req, res) => {
     const userId = (req as typeof req & { userId: string }).userId;
     const agentId = req.params.id;
 
-    const agent = await prisma.agent.findFirst({ where: { id: agentId, userId } });
+    let agent = await prisma.agent.findFirst({ where: { id: agentId, userId } });
+
+    // If agent doesn't exist in Platform DB, auto-create from Protocol API
     if (!agent) {
-      return res.status(404).json({ error: 'Agent not found' });
+      try {
+        const protoRes = await fetch(`https://api.saidprotocol.com/api/agents/${agentId}`, {
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (protoRes.ok) {
+          const protoAgent = await protoRes.json();
+          const walletAddress = protoAgent.wallet || protoAgent.walletAddress || '';
+          agent = await prisma.agent.create({
+            data: {
+              id: agentId,
+              userId,
+              name: protoAgent.name || 'Unnamed Agent',
+              walletAddress: walletAddress || undefined,
+              status: 'active',
+              tier: 'starter',
+              platform: 'said-protocol',
+              externalId: agentId,
+            },
+          });
+          console.log(`[provision-wallet] Auto-created agent ${agentId} from Protocol API`);
+        } else {
+          return res.status(404).json({ error: 'Agent not found in Protocol API either' });
+        }
+      } catch (protoErr) {
+        console.error('[provision-wallet] Protocol API lookup failed:', protoErr);
+        return res.status(404).json({ error: 'Agent not found' });
+      }
     }
 
     // Idempotent: return existing wallet + key
@@ -565,5 +594,139 @@ agentRouter.post('/:id/provision-wallet', async (req, res) => {
   } catch (error) {
     console.error('[provision-wallet] Error:', error);
     return res.status(500).json({ error: 'Failed to provision wallet' });
+  }
+});
+
+/**
+ * POST /agents/create-with-wallet
+ * Create a new agent with a Privy custodial wallet + API key.
+ * Used by the website's "Create Agent" flow.
+ * Returns { agentId, walletAddress, apiKey }.
+ */
+agentRouter.post('/create-with-wallet', async (req, res) => {
+  try {
+    const userId = (req as typeof req & { userId: string }).userId;
+    const { name, description, twitter, website, capabilities } = req.body || {};
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Agent name is required' });
+    }
+
+    // 1. Create Privy wallet
+    const { walletId, address } = await createAgentWallet();
+    console.log(`[create-with-wallet] Created Privy wallet ${address}`);
+
+    // 2. Register SAID identity on-chain via Protocol API
+    let saidIdentity: { registered: boolean; pda?: string; profile?: string } = { registered: false };
+    const hostingApiKey = process.env.SAID_HOSTING_API_KEY;
+    if (hostingApiKey) {
+      try {
+        // Step 1: Build registration transaction
+        const regRes = await fetch('https://api.saidprotocol.com/api/platforms/said-hosting/register', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Platform-Key': hostingApiKey,
+          },
+          body: JSON.stringify({
+            wallet: address,
+            name: name.trim(),
+            description: description || '',
+            twitter: twitter || '',
+            website: website || '',
+            capabilities: capabilities || ['chat', 'assistant'],
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+
+        if (regRes.ok) {
+          const regData = await regRes.json();
+
+          if (regData.success && !regData.transaction) {
+            // Already registered
+            saidIdentity = {
+              registered: true,
+              pda: regData.agent?.pda,
+              profile: regData.agent?.profile,
+            };
+          } else if (regData.transaction) {
+            // Step 2: Sign transaction with Privy wallet
+            const { signTransaction } = await import('../services/privy-wallets');
+            const signature = await signTransaction(walletId, regData.transaction);
+            console.log(`[create-with-wallet] Signed registration tx: ${signature}`);
+
+            // Step 3: Confirm/broadcast via Protocol API
+            const confirmRes = await fetch('https://api.saidprotocol.com/api/platforms/said-hosting/confirm', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Platform-Key': hostingApiKey,
+              },
+              body: JSON.stringify({
+                signedTransaction: signature,
+                wallet: address,
+              }),
+              signal: AbortSignal.timeout(30000),
+            });
+
+            if (confirmRes.ok) {
+              const confirmData = await confirmRes.json();
+              saidIdentity = {
+                registered: true,
+                pda: confirmData.pda,
+                profile: `https://www.saidprotocol.com/agents/${address}`,
+              };
+              console.log(`[create-with-wallet] SAID identity registered: ${confirmData.pda}`);
+            } else {
+              const errData = await confirmRes.json().catch(() => ({}));
+              console.error('[create-with-wallet] Confirm failed:', errData);
+            }
+          }
+        } else {
+          const errData = await regRes.json().catch(() => ({}));
+          console.error('[create-with-wallet] Registration failed:', errData);
+        }
+      } catch (regErr) {
+        console.error('[create-with-wallet] SAID registration error (non-fatal):', regErr);
+        // Non-fatal — agent still gets wallet + API key
+      }
+    } else {
+      console.warn('[create-with-wallet] SAID_HOSTING_API_KEY not set — skipping on-chain registration');
+    }
+
+    // 3. Generate API key
+    const apiKey = generateGatewayToken();
+    const apiKeyHash = hashGatewayToken(apiKey);
+
+    // 4. Create agent record
+    const agent = await prisma.agent.create({
+      data: {
+        userId,
+        name: name.trim(),
+        privyWalletId: walletId,
+        walletAddress: address,
+        gatewayToken: apiKey,
+        gatewayTokenHash: apiKeyHash,
+        status: 'active',
+        tier: 'starter',
+        platform: 'said-website',
+        saidRegistered: saidIdentity.registered,
+        saidPda: saidIdentity.pda || undefined,
+        saidVerified: saidIdentity.registered, // sponsored = auto-verified
+      },
+    });
+
+    console.log(`[create-with-wallet] Agent "${name.trim()}" (${address}) created for user ${userId}`);
+
+    return res.status(201).json({
+      agentId: agent.id,
+      walletAddress: address,
+      apiKey,
+      gatewayToken: apiKey, // backward compat
+      saidIdentity,
+    });
+  } catch (error) {
+    console.error('[create-with-wallet] Error:', error);
+    return res.status(500).json({ error: 'Failed to create agent' });
   }
 });
