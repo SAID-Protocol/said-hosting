@@ -17,6 +17,7 @@
     "@privy-io/server-auth": "^1.32.5",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
+    "@types/ws": "^8.18.1",
     "axios": "1.14.0",
     "bs58": "^6.0.0",
     "cors": "^2.8.5",
@@ -24,7 +25,8 @@
     "express": "^4.21.0",
     "express-rate-limit": "^8.3.1",
     "prisma": "^6.19.2",
-    "tweetnacl": "^1.0.3"
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.21.0"
   },
   "overrides": {
     "@metaplex-foundation/mpl-agent-registry": {
