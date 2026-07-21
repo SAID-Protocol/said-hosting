@@ -203,3 +203,159 @@ partnerRouter.delete('/agents/:externalId', async (req, res) => {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to delete agent' });
   }
 });
+
+// ── Trust Score Endpoint ─────────────────────────────────────────────────
+// Partners can query SAID trust scores for any wallet, including their own agents.
+// This enables partners to make trust-aware decisions in their platforms.
+
+partnerRouter.get('/trust/:wallet', async (req, res) => {
+  try {
+    const wallet = req.params.wallet;
+    if (!wallet || wallet.length < 32 || wallet.length > 44) {
+      res.status(400).json({ error: 'Valid wallet address required' });
+      return;
+    }
+
+    // Query SAID public API for trust data
+    const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+    const response = await fetch(`${SAID_API}/api/verify/${wallet}`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        res.json({
+          wallet,
+          registered: false,
+          verified: false,
+          trustScore: null,
+        });
+        return;
+      }
+      throw new Error(`SAID API returned ${response.status}`);
+    }
+
+    const data = await response.json() as any;
+
+    res.json({
+      wallet,
+      registered: data.registered ?? false,
+      verified: data.verified ?? false,
+      identity: data.identity ?? null,
+      trustScore: data.trustScore ?? null,
+      reputation: data.reputation ?? null,
+      endpoints: data.endpoints ?? null,
+    });
+  } catch (error) {
+    console.error('[partner] Trust score query failed:', error instanceof Error ? error.message : error);
+    res.status(500).json({ error: 'Failed to query trust score' });
+  }
+});
+
+// ── Trust Breakdown Endpoint ─────────────────────────────────────────────
+// Returns transparent point-by-point score breakdown.
+
+partnerRouter.get('/trust/:wallet/breakdown', async (req, res) => {
+  try {
+    const wallet = req.params.wallet;
+    if (!wallet || wallet.length < 32 || wallet.length > 44) {
+      res.status(400).json({ error: 'Valid wallet address required' });
+      return;
+    }
+
+    const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+    const response = await fetch(`${SAID_API}/api/verify/${wallet}`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        res.json({ wallet, score: null, breakdown: null });
+        return;
+      }
+      throw new Error(`SAID API returned ${response.status}`);
+    }
+
+    const data = await response.json() as any;
+
+    if (!data.trustScore) {
+      res.json({
+        wallet,
+        score: data.reputation?.score ?? 0,
+        tier: data.reputation?.tier ?? 'Unverified',
+        breakdown: null,
+        message: 'Agent verified but no detailed trust score available',
+      });
+      return;
+    }
+
+    const ts = data.trustScore;
+    res.json({
+      wallet,
+      score: ts.score,
+      tier: ts.tier,
+      badges: ts.badges ?? [],
+      sources: ts.sources ?? [],
+      breakdown: {
+        identity: ts.identity ?? 0,
+        activity: ts.activity ?? 0,
+        economic: ts.economic ?? 0,
+        ecosystem: ts.ecosystem ?? 0,
+        longevity: ts.longevity ?? 0,
+        fairscale: ts.fairscale ?? 0,
+      },
+      computedAt: ts.computedAt ?? null,
+    });
+  } catch (error) {
+    console.error('[partner] Trust breakdown failed:', error instanceof Error ? error.message : error);
+    res.status(500).json({ error: 'Failed to query trust breakdown' });
+  }
+});
+
+// ── Batch Trust Check ────────────────────────────────────────────────────
+// Check trust scores for multiple wallets in one call.
+
+partnerRouter.post('/trust/batch', async (req, res) => {
+  try {
+    const wallets = req.body?.wallets;
+    if (!Array.isArray(wallets) || wallets.length === 0) {
+      res.status(400).json({ error: 'wallets array is required' });
+      return;
+    }
+    if (wallets.length > 50) {
+      res.status(400).json({ error: 'Maximum 50 wallets per batch' });
+      return;
+    }
+
+    const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+
+    const results = await Promise.allSettled(
+      wallets.map(async (wallet: string) => {
+        const response = await fetch(`${SAID_API}/api/verify/${wallet}`);
+        if (!response.ok) {
+          return { wallet, registered: false, verified: false, trustScore: null };
+        }
+        const data = await response.json() as any;
+        return {
+          wallet,
+          registered: data.registered ?? false,
+          verified: data.verified ?? false,
+          score: data.trustScore?.score ?? null,
+          tier: data.trustScore?.tier ?? null,
+        };
+      })
+    );
+
+    const trustResults = results.map((result, i) => {
+      if (result.status === 'fulfilled') return result.value;
+      return {
+        wallet: wallets[i],
+        registered: false,
+        verified: false,
+        trustScore: null,
+        error: result.reason?.message ?? 'Lookup failed',
+      };
+    });
+
+    res.json({ results: trustResults });
+  } catch (error) {
+    console.error('[partner] Batch trust check failed:', error instanceof Error ? error.message : error);
+    res.status(500).json({ error: 'Failed to batch check trust' });
+  }
+});
