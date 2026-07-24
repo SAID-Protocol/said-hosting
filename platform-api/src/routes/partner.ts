@@ -359,3 +359,260 @@ partnerRouter.post('/trust/batch', async (req, res) => {
     res.status(500).json({ error: 'Failed to batch check trust' });
   }
 });
+
+// ── Enforcement Status ───────────────────────────────────────────────────
+// Query on-chain staking/slashing data for any wallet.
+// This is SAID's #1 differentiator — economic enforcement data.
+
+partnerRouter.get('/enforcement/:wallet', async (req, res) => {
+  try {
+    const wallet = req.params.wallet;
+    if (!wallet || wallet.length < 32 || wallet.length > 44) {
+      res.status(400).json({ error: 'Valid wallet address required' });
+      return;
+    }
+
+    const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+    const response = await fetch(`${SAID_API}/api/enforcement/${wallet}`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        res.json({
+          wallet,
+          registered: false,
+          enforcementTier: 'none',
+          staked: false,
+          stakeAmountSOL: 0,
+          slashed: false,
+          slashedCount: 0,
+        });
+        return;
+      }
+      throw new Error(`SAID API returned ${response.status}`);
+    }
+
+    const data = await response.json() as any;
+
+    const stakeAmount = data.stakeAmountSOL ?? 0;
+    const slashCount = data.slashedCount ?? 0;
+
+    let enforcementTier = 'none';
+    if (stakeAmount > 0 && slashCount === 0) enforcementTier = 'economic';
+    else if (data.registered || data.verified) enforcementTier = 'reputation';
+
+    let riskLevel = 'low';
+    if (slashCount > 0) riskLevel = 'critical';
+    else if (stakeAmount === 0) riskLevel = 'high';
+    else if (stakeAmount < 1.0) riskLevel = 'medium';
+
+    res.json({
+      wallet,
+      registered: data.registered ?? false,
+      verified: data.verified ?? false,
+      enforcementTier,
+      staked: stakeAmount > 0,
+      stakeAmountSOL: stakeAmount,
+      stakeAmountLamports: data.stakeAmountLamports ?? null,
+      stakeStatus: data.stakeStatus ?? 'none',
+      slashed: slashCount > 0,
+      slashedCount: slashCount,
+      riskLevel,
+      summary: enforcementTier === 'economic'
+        ? `Economically secured with ${stakeAmount.toFixed(2)} SOL staked`
+        : enforcementTier === 'reputation'
+          ? 'Registered but no economic collateral'
+          : 'No enforcement data available',
+    });
+  } catch (error) {
+    console.error('[partner] Enforcement query failed:', error instanceof Error ? error.message : error);
+    res.status(500).json({ error: 'Failed to query enforcement status' });
+  }
+});
+
+// ── Risk Assessment ───────────────────────────────────────────────────────
+// Returns a risk assessment with escrow recommendations and spend caps.
+// Enables marketplaces to make automated trust-gated decisions.
+
+partnerRouter.get('/risk/:wallet', async (req, res) => {
+  try {
+    const wallet = req.params.wallet;
+    if (!wallet || wallet.length < 32 || wallet.length > 44) {
+      res.status(400).json({ error: 'Valid wallet address required' });
+      return;
+    }
+
+    // Fetch verification data and enforcement data in parallel
+    const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+    const [verifyRes, enforcementRes] = await Promise.allSettled([
+      fetch(`${SAID_API}/api/verify/${wallet}`).then(r => r.ok ? r.json() : null),
+      fetch(`${SAID_API}/api/enforcement/${wallet}`).then(r => r.ok ? r.json() : null),
+    ]);
+
+    const verifyData = verifyRes.status === 'fulfilled' ? verifyRes.value : null;
+    const enfData = enforcementRes.status === 'fulfilled' ? enforcementRes.value : null;
+
+    if (!verifyData?.registered) {
+      res.json({
+        wallet,
+        registered: false,
+        riskLevel: 'critical',
+        recommendation: 'reject',
+        escrowPct: 100,
+        spendCapUSDC: 0,
+        reason: 'Agent not registered with SAID Protocol',
+      });
+      return;
+    }
+
+    const score = verifyData.trustScore?.score ?? null;
+    const verified = verifyData.verified ?? false;
+    const stakeSOL = enfData?.stakeAmountSOL ?? 0;
+    const slashedCount = enfData?.slashedCount ?? 0;
+    const slashed = slashedCount > 0;
+
+    // Risk factors
+    const riskFactors: string[] = [];
+    const positiveSignals: string[] = [];
+
+    if (!verified) riskFactors.push('Agent not verified');
+    else positiveSignals.push('SAID-verified agent');
+
+    if (stakeSOL >= 1.0) positiveSignals.push(`${stakeSOL.toFixed(2)} SOL staked`);
+    else if (stakeSOL > 0) riskFactors.push(`Low stake (${stakeSOL.toFixed(2)} SOL)`);
+    else riskFactors.push('No stake deposited');
+
+    if (slashed) {
+      riskFactors.push(`${slashedCount} slashing event(s)`);
+    }
+
+    // Calculate risk level
+    let riskLevel: string;
+    let recommendation: string;
+    let escrowPct: number;
+    let spendCap: number | null;
+
+    if (slashed) {
+      riskLevel = 'critical';
+      recommendation = 'reject';
+      escrowPct = 100;
+      spendCap = 0;
+    } else if (score === null && stakeSOL === 0) {
+      riskLevel = 'high';
+      recommendation = 'review';
+      escrowPct = 100;
+      spendCap = null;
+    } else if (score !== null && score < 20) {
+      riskLevel = 'high';
+      recommendation = 'review';
+      escrowPct = 100;
+      spendCap = stakeSOL * 50;
+    } else if (score !== null && score < 50) {
+      riskLevel = 'medium';
+      recommendation = 'review';
+      escrowPct = Math.max(50, 100 - score * 0.9);
+      spendCap = stakeSOL * 100 + (score * 5);
+    } else {
+      riskLevel = 'low';
+      recommendation = 'accept';
+      const scoreBased = Math.max(10, 100 - (score ?? 0) * 0.9);
+      const stakeDiscount = Math.min(scoreBased - 10, stakeSOL * 2);
+      escrowPct = Math.round(Math.max(10, scoreBased - stakeDiscount));
+      spendCap = stakeSOL * 100 + (score ?? 0) * 10;
+    }
+
+    res.json({
+      wallet,
+      registered: true,
+      verified,
+      score,
+      tier: verifyData.trustScore?.tier ?? null,
+      riskLevel,
+      recommendation, // accept | review | reject
+      escrowPct,
+      spendCapUSDC: spendCap,
+      stakeSOL,
+      slashed,
+      slashedCount,
+      enforcementAvailable: stakeSOL > 0 && !slashed,
+      riskFactors,
+      positiveSignals,
+      summary: recommendation === 'accept'
+        ? `Trusted agent (score: ${score}, stake: ${stakeSOL.toFixed(2)} SOL)`
+        : recommendation === 'review'
+          ? `Caution advised — ${riskFactors.join(', ')}`
+          : 'High risk — transaction not recommended',
+    });
+  } catch (error) {
+    console.error('[partner] Risk assessment failed:', error instanceof Error ? error.message : error);
+    res.status(500).json({ error: 'Failed to assess risk' });
+  }
+});
+
+// ── List Partner Agents with Trust Data ───────────────────────────────────
+// Returns all agents for this partner with embedded trust + enforcement data.
+
+partnerRouter.get('/agents', async (req, res) => {
+  try {
+    const partnerId = (req as any).partnerId as string;
+    const platform = req.query.platform as string | undefined;
+
+    const where: any = { partnerId };
+    if (platform) where.platform = platform;
+
+    const agents = await prisma.agent.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        tier: true,
+        walletAddress: true,
+        platform: true,
+        externalId: true,
+        saidRegistered: true,
+        saidVerified: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Batch fetch trust data for all agents with wallets
+    const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
+    const trustData = await Promise.allSettled(
+      agents
+        .filter((a: any) => a.walletAddress)
+        .map(async (agent: any) => {
+          const response = await fetch(`${SAID_API}/api/verify/${agent.walletAddress}`);
+          if (!response.ok) return null;
+          const data = await response.json() as any;
+          return {
+            wallet: agent.walletAddress,
+            score: data.trustScore?.score ?? null,
+            tier: data.trustScore?.tier ?? null,
+            verified: data.verified ?? false,
+          };
+        })
+    );
+
+    const trustMap = new Map<string, any>();
+    trustData.forEach((result: any) => {
+      if (result.status === 'fulfilled' && result.value) {
+        trustMap.set((result.value as any).wallet, result.value);
+      }
+    });
+
+    const enrichedAgents = agents.map((agent: any) => ({
+      ...agent,
+      trustScore: trustMap.get(agent.walletAddress)?.score ?? null,
+      trustTier: trustMap.get(agent.walletAddress)?.tier ?? null,
+    }));
+
+    res.json({
+      agents: enrichedAgents,
+      count: agents.length,
+    });
+  } catch (error) {
+    console.error('[partner] List agents failed:', error instanceof Error ? error.message : error);
+    res.status(500).json({ error: 'Failed to list agents' });
+  }
+});
