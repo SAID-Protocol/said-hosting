@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db';
 import {
   createAgentWallet,
+  importAgentWallet,
   signTransaction,
   signTransactionOnly,
   preProvisionTwitterUser,
@@ -100,6 +101,81 @@ butlerRouter.post('/provision', async (req, res) => {
   } catch (error) {
     console.error('[butler] Provision error:', error);
     res.status(500).json({ error: error instanceof Error ? error.message : 'Provision failed' });
+  }
+});
+
+/**
+ * Provision from an existing keypair (vanity addresses for house wallets).
+ * Same record as /provision, but the wallet is imported rather than created.
+ * The secret travels once, over TLS, to this route and on to Privy's enclave;
+ * it is not persisted and not logged.
+ *
+ * POST /api/butler/import
+ * Body: { externalId: "atcha_pool", platform: "system", secretKey: "<base58 64-byte secret>" | [..64 numbers..] }
+ * Returns: { id, externalId, walletAddress, alreadyExists }
+ */
+butlerRouter.post('/import', async (req, res) => {
+  try {
+    const { externalId, platform, secretKey } = req.body || {};
+
+    if (!externalId || typeof externalId !== 'string') {
+      res.status(400).json({ error: 'externalId is required (e.g. "atcha_pool")' });
+      return;
+    }
+    // House wallets only (pool, buyback, lock). Users never import keys; hosting creates theirs.
+    if (platform !== 'system' || !/^atcha_[a-z0-9_]{1,32}$/.test(externalId)) {
+      res.status(400).json({ error: 'import is for house wallets only: platform "system", externalId "atcha_<name>"' });
+      return;
+    }
+
+    let bytes: Uint8Array;
+    try {
+      if (Array.isArray(secretKey)) {
+        bytes = Uint8Array.from(secretKey as number[]);
+      } else if (typeof secretKey === 'string') {
+        const trimmed = secretKey.trim();
+        bytes = trimmed.startsWith('[') ? Uint8Array.from(JSON.parse(trimmed) as number[]) : bs58.decode(trimmed);
+      } else {
+        throw new Error('missing');
+      }
+    } catch {
+      res.status(400).json({ error: 'secretKey must be a base58 string or a JSON array of bytes (solana-keygen format)' });
+      return;
+    }
+    if (bytes.length !== 64) {
+      res.status(400).json({ error: `secretKey must be the 64-byte Solana secret key (got ${bytes.length} bytes)` });
+      return;
+    }
+    const address = Keypair.fromSecretKey(bytes).publicKey.toBase58();
+
+    // Idempotent on the same key; never silently rebind an externalId to a different wallet
+    const existing = await prisma.butlerUser.findUnique({ where: { externalId } });
+    if (existing) {
+      if (existing.walletAddress === address) {
+        res.json({ id: existing.id, externalId: existing.externalId, walletAddress: existing.walletAddress, alreadyExists: true });
+      } else {
+        res.status(409).json({ error: `externalId already exists with wallet ${existing.walletAddress}` });
+      }
+      return;
+    }
+    const taken = await prisma.butlerUser.findFirst({ where: { walletAddress: address } });
+    if (taken) {
+      res.status(409).json({ error: `wallet ${address} already belongs to ${taken.externalId}` });
+      return;
+    }
+
+    const { walletId } = await importAgentWallet(bytes);
+    bytes.fill(0);
+    console.log(`[butler] Imported agent wallet ${address} for ${externalId}`);
+
+    const user = await prisma.butlerUser.create({
+      data: { externalId, platform, walletAddress: address, privyWalletId: walletId },
+    });
+
+    res.status(201).json({ id: user.id, externalId: user.externalId, walletAddress: address, alreadyExists: false });
+  } catch (error) {
+    console.error('[butler] Import error:', error instanceof Error ? error.message : error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Import failed' });
   }
 });
 

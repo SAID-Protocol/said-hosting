@@ -46,6 +46,39 @@ export async function createAgentWallet(): Promise<{ walletId: string; address: 
 }
 
 /**
+ * Import an existing Solana keypair as a Privy wallet (for vanity addresses:
+ * the pool and buyback wallets are public, and a ground address reads as ours).
+ * The secret is HPKE-encrypted to Privy's enclave by the SDK and never stored
+ * or logged here. Returns { walletId, address }; the address is derived locally
+ * and must match what Privy reports back.
+ */
+export async function importAgentWallet(secretKey: Uint8Array): Promise<{ walletId: string; address: string }> {
+  const { Keypair } = await import('@solana/web3.js');
+  const expected = Keypair.fromSecretKey(secretKey).publicKey.toBase58();
+  console.log(`[privy-wallets] Importing Solana wallet ${expected}...`);
+
+  const result = await (privy as any).wallets().import({
+    wallet: {
+      chain_type: 'solana',
+      entropy_type: 'private-key',
+      address: expected,
+      private_key: secretKey,
+    },
+  });
+
+  const walletId = (result as any).id;
+  const address = (result as any).address;
+  if (!walletId || !address) {
+    throw new Error('Privy wallet import failed - missing id or address');
+  }
+  if (address !== expected) {
+    throw new Error(`Privy wallet import returned ${address}, expected ${expected}`);
+  }
+  console.log(`[privy-wallets] Imported wallet ${walletId} (${address})`);
+  return { walletId, address };
+}
+
+/**
  * Sign a transaction with an agent's Privy wallet
  * 
  * @param walletId - The Privy wallet ID (from database)
