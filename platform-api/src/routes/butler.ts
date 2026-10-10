@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../db';
-import {
+import { signMessage,
   createAgentWallet,
   importAgentWallet,
   signTransaction,
@@ -18,6 +18,7 @@ import {
   LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
 import bs58 from 'bs58';
+import nacl from 'tweetnacl';
 
 export const butlerRouter = Router();
 
@@ -812,6 +813,54 @@ butlerRouter.post('/sign', async (req, res) => {
  * }
  * Returns: { signature }
  */
+/**
+ * Sign the SAID work loop's slot-claim message for a hosted agent.
+ *
+ * Hosted agents hold no key of their own, so they cannot sign the one-time
+ * approval that binds a worker key to their slot. This route signs it with
+ * the agent's Privy wallet, but builds the message itself from three fields
+ * and signs nothing else: it is not a general message-signing route. The
+ * timestamp must be within five minutes, and the result is checked against
+ * the agent's address before it is returned.
+ *
+ * POST /api/butler/sign-work-claim
+ * Body: { externalId, workerKey, timestamp }
+ * → { wallet, message, signature }   (signature base58, as the work loop expects)
+ */
+const WORK_CLAIM_WINDOW_MS = 5 * 60_000;
+butlerRouter.post('/sign-work-claim', async (req, res) => {
+  try {
+    const { externalId, workerKey, timestamp } = req.body || {};
+    if (!externalId || typeof externalId !== 'string') return res.status(400).json({ error: 'externalId is required' });
+    if (typeof workerKey !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(workerKey)) return res.status(400).json({ error: 'workerKey must be a base58 public key' });
+    let wk: Uint8Array;
+    try { wk = bs58.decode(workerKey); } catch { return res.status(400).json({ error: 'workerKey must be a base58 public key' }); }
+    if (wk.length !== 32) return res.status(400).json({ error: 'workerKey must be a 32-byte public key' });
+    if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > WORK_CLAIM_WINDOW_MS) {
+      return res.status(400).json({ error: 'timestamp must be a number of milliseconds within five minutes of now' });
+    }
+    const user = await prisma.butlerUser.findUnique({ where: { externalId } });
+    if (!user) return res.status(404).json({ error: 'Agent not found' });
+    if (!user.privyWalletId || !user.walletAddress) return res.status(400).json({ error: 'Agent wallet not provisioned' });
+    if (!user.saidVerified) return res.status(400).json({ error: 'Agent is not SAID-verified' });
+
+    const message = `SAID:work:claim-slot:${user.walletAddress}:${workerKey}:${Math.trunc(timestamp)}`;
+    const raw = await signMessage(user.privyWalletId, message);
+    // Privy returns base64 (sometimes base58); the work loop wants base58.
+    let sigBytes: Uint8Array | null = null;
+    try { const b = Buffer.from(raw, 'base64'); if (b.length === 64) sigBytes = new Uint8Array(b); } catch { /* not base64 */ }
+    if (!sigBytes) { try { const b = bs58.decode(raw); if (b.length === 64) sigBytes = b; } catch { /* not base58 */ } }
+    if (!sigBytes) return res.status(502).json({ error: 'signer returned an unreadable signature' });
+    const ok = nacl.sign.detached.verify(new TextEncoder().encode(message), sigBytes, bs58.decode(user.walletAddress));
+    if (!ok) return res.status(502).json({ error: 'signature did not verify against the agent wallet' });
+    console.log(`[butler] Signed work slot claim for ${externalId} (worker ${workerKey.slice(0, 8)}…)`);
+    return res.json({ wallet: user.walletAddress, message, signature: bs58.encode(sigBytes) });
+  } catch (err) {
+    console.error('[butler] sign-work-claim failed:', err);
+    return res.status(500).json({ error: 'signing failed' });
+  }
+});
+
 butlerRouter.post('/send', async (req, res) => {
   try {
     const { externalId, instructions } = req.body || {};
