@@ -157,6 +157,20 @@ export async function signMessage(
 }
 
 /**
+ * Sign a UTF-8 message with a Solana wallet through the current Privy SDK
+ * (wallets().solana().signMessage). Returns the 64-byte signature as base64.
+ * The older signMessage above sends a caip2 field Privy now rejects.
+ */
+export async function signSolanaMessage(walletId: string, message: string): Promise<string> {
+  const result = await (privy as any).wallets().solana().signMessage(walletId, {
+    message: new TextEncoder().encode(message),
+  });
+  const signature = result?.signature ?? result?.data?.signature;
+  if (!signature) throw new Error('Privy message signing returned no signature');
+  return signature;
+}
+
+/**
  * Resolve a social handle to a Solana wallet via Privy's linked-accounts index.
  *
  * Privy maintains the canonical "human ↔ linked accounts" mapping. We call its

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../db';
-import { signMessage,
+import { signSolanaMessage,
   createAgentWallet,
   importAgentWallet,
   signTransaction,
@@ -846,7 +846,7 @@ butlerRouter.post('/sign-work-claim', async (req, res) => {
     // table's saidVerified flag is stale for agents registered via the protocol route.
 
     const message = `SAID:work:claim-slot:${user.walletAddress}:${workerKey}:${Math.trunc(timestamp)}`;
-    const raw = await signMessage(user.privyWalletId, message);
+    const raw = await signSolanaMessage(user.privyWalletId, message);
     // Privy returns base64 (sometimes base58); the work loop wants base58.
     let sigBytes: Uint8Array | null = null;
     try { const b = Buffer.from(raw, 'base64'); if (b.length === 64) sigBytes = new Uint8Array(b); } catch { /* not base64 */ }
