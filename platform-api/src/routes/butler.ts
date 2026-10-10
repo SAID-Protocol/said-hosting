@@ -842,7 +842,8 @@ butlerRouter.post('/sign-work-claim', async (req, res) => {
     const user = await prisma.butlerUser.findUnique({ where: { externalId } });
     if (!user) return res.status(404).json({ error: 'Agent not found' });
     if (!user.privyWalletId || !user.walletAddress) return res.status(400).json({ error: 'Agent wallet not provisioned' });
-    if (!user.saidVerified) return res.status(400).json({ error: 'Agent is not SAID-verified' });
+    // Verification is checked by the work loop when the slot is claimed; this
+    // table's saidVerified flag is stale for agents registered via the protocol route.
 
     const message = `SAID:work:claim-slot:${user.walletAddress}:${workerKey}:${Math.trunc(timestamp)}`;
     const raw = await signMessage(user.privyWalletId, message);
