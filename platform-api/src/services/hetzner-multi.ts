@@ -23,6 +23,35 @@ if (process.env.HETZNER_SSH_KEY_B64 && !fs.existsSync(HETZNER_SSH_KEY)) {
 
 type TierKey = 'free' | 'trial' | 'starter' | 'pro' | 'power';
 
+/**
+ * The container's environment as a docker --env-file. Values never touch the
+ * shell: the file goes over base64 and docker reads it line by line, so a
+ * user-supplied token (telegram, OpenRouter) cannot break out of the command
+ * that runs as root on the host. A newline in a value would start a new line
+ * of the file, so those are stripped; the keys are ours and fixed.
+ */
+export function envFileContents(envVars: string[]): string {
+  return envVars
+    .map((v) => {
+      const eq = v.indexOf('=');
+      const key = eq === -1 ? v : v.slice(0, eq);
+      const value = eq === -1 ? '' : v.slice(eq + 1);
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) throw new Error(`bad env key: ${key}`);
+      return `${key}=${value.replace(/[\r\n]/g, '')}`;
+    })
+    .join('\n') + '\n';
+}
+
+/** Write the env file on the host, root-only, and return the flag that loads it. */
+async function writeEnvFile(hostIp: string, dataDir: string, envVars: string[]): Promise<string> {
+  // The agent id is ours (Prisma), but it is spliced into a root shell command, so it is checked here all the same.
+  if (!/^\/opt\/said-hosting\/agents\/[A-Za-z0-9_-]+$/.test(dataDir)) throw new Error(`bad agent data dir: ${dataDir}`);
+  const b64 = Buffer.from(envFileContents(envVars)).toString('base64');
+  const file = `${dataDir}/.container_env`;
+  await sshExec(hostIp, `umask 077 && echo '${b64}' | base64 -d > ${file} && chown root:root ${file} && chmod 600 ${file}`);
+  return `--env-file ${file}`;
+}
+
 type ContainerInfo = {
   id: string;
   name: string;
@@ -207,7 +236,6 @@ export async function createContainer(params: {
     console.log('[hetzner] Trial agent - configured z.ai proxy URLs with agent ID as key');
   }
 
-  const envFlags = envVars.map(v => `-e '${v}'`).join(' ');
   const dataDir = `/opt/said-hosting/agents/${params.agentId}`;
   
   await sshExec(hostIp, `mkdir -p ${dataDir} && chown -R 1000:1000 ${dataDir}`);
@@ -228,6 +256,7 @@ export async function createContainer(params: {
   }
 
   await sshExec(hostIp, `chown -R 1000:1000 ${dataDir}`);
+  const envFlags = await writeEnvFile(hostIp, dataDir, envVars);
 
   const dockerCmd = `docker run -d \
     --name ${containerName} \
@@ -320,7 +349,7 @@ async function recreateContainer(agentId: string, hostIp: string): Promise<void>
     );
   }
 
-  const envFlags = envVars.map(v => `-e '${v}'`).join(' ');
+  const envFlags = await writeEnvFile(hostIp, dataDir, envVars);
 
   const dockerCmd = `docker run -d \
     --name ${containerName} \
